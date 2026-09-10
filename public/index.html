@@ -4,6 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>message_viewer</title>
+<script>
+/* Pick the theme before the stylesheet is applied, otherwise a light-mode user
+   gets a dark flash on every load. Matches the OS until you choose explicitly. */
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('mv.theme'); } catch (e) {}
+  if (t !== 'light' && t !== 'dark') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📋</text></svg>">
 </head>
@@ -14,6 +26,7 @@
       <h1>message_viewer</h1>
       <div class="side-actions">
         <button id="btn-new-channel" class="btn small" title="New channel">+ channel</button>
+        <button id="btn-theme" class="btn small icon" title="Switch to light mode">&#9728;</button>
         <button id="btn-settings" class="btn small icon" title="Settings">&#9881;</button>
       </div>
     </div>
@@ -75,7 +88,18 @@
           <option value="500">500</option>
         </select>
         <span class="spacer"></span>
-        <label class="field auto"><input id="auto" type="checkbox" checked> auto&#8209;refresh</label>
+        <select id="interval" class="btn" title="reload the whole board — sidebar, counts and message list — on a timer">
+          <option value="0">refresh: off</option>
+          <option value="5">every 5 s</option>
+          <option value="10">every 10 s</option>
+          <option value="15" selected>every 15 s</option>
+          <option value="30">every 30 s</option>
+          <option value="60">every minute</option>
+          <option value="120">every 2 min</option>
+          <option value="300">every 5 min</option>
+          <option value="900">every 15 min</option>
+          <option value="3600">every hour</option>
+        </select>
         <button id="btn-refresh" class="btn" title="reload (r)">&#8635;</button>
       </div>
       <div id="tag-filter-panel" class="tag-panel hidden"></div>
@@ -109,7 +133,7 @@
     <h2>Settings</h2>
     <p class="hint">Server-to-server token. Leave empty when the server runs without <code>MV_TOKEN</code>. Stored in this browser only.</p>
     <label class="field wide">token <input id="set-token" type="password" placeholder="MV_TOKEN value" spellcheck="false"></label>
-    <label class="field wide">auto-refresh interval (seconds) <input id="set-interval" type="number" min="2" max="3600" value="15"></label>
+    <label class="field wide">auto-refresh interval, seconds (0 turns it off) <input id="set-interval" type="number" min="0" max="3600" value="15"></label>
     <p id="set-health" class="hint"></p>
     <div class="row end">
       <button value="cancel" class="btn">cancel</button>

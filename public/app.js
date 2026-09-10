@@ -18,8 +18,12 @@ const el = (tag, attrs = {}, ...kids) => {
 const LS = {
   get token() { return localStorage.getItem('mv.token') || ''; },
   set token(v) { localStorage.setItem('mv.token', v || ''); },
-  get interval() { return Number(localStorage.getItem('mv.interval') || 15); },
+  // 0 is a real value here: it means "do not refresh on a timer"
+  get interval() { const v = localStorage.getItem('mv.interval'); return v === null ? 15 : Number(v); },
   set interval(v) { localStorage.setItem('mv.interval', String(v)); },
+  // null until the user chooses, which means "follow the operating system"
+  get theme() { return localStorage.getItem('mv.theme'); },
+  set theme(v) { localStorage.setItem('mv.theme', v || ''); },
   // Read state is per browser: one anonymous id per browser profile, no accounts.
   get reader() {
     let v = localStorage.getItem('mv.reader');
@@ -41,7 +45,6 @@ const S = {
   messages: [],
   sel: new Set(),
   expanded: new Set(JSON.parse(localStorage.getItem('mv.expanded') || '[]')),
-  auto: true,
   timer: null,
   // ids that arrived while this thread has been open; cleared when you leave it
   live: new Set(),
@@ -170,7 +173,7 @@ async function loadTags() {
 }
 
 async function loadMessages({ keepScroll = false } = {}) {
-  const scroll = window.scrollY;
+  const scroll = $('#main').scrollTop; // #main scrolls; the window itself never does
   const query = {
     sort: S.f.sort,
     limit: S.f.limit,
@@ -204,10 +207,10 @@ async function loadMessages({ keepScroll = false } = {}) {
   }
   S.total = d.total;
   S.messages = d.messages;
-  if (!keepScroll) window.scrollTo(0, 0);
-  else window.scrollTo(0, scroll);
   renderMessages();
   renderCrumbs();
+  // restore after the new list exists, otherwise the offset is clamped to old content
+  $('#main').scrollTop = keepScroll ? scroll : 0;
 }
 
 async function reload({ keepScroll = false } = {}) {
@@ -862,7 +865,11 @@ function bindUi() {
     loadMessages();
   });
 
-  $('#btn-tags').addEventListener('click', () => $('#tag-filter-panel').classList.toggle('hidden'));
+  $('#btn-tags').addEventListener('click', () => {
+    const panel = $('#tag-filter-panel');
+    panel.classList.toggle('hidden');
+    if (!panel.classList.contains('hidden')) loadTags(); // counts must not be stale on open
+  });
   $('#btn-tag-match').addEventListener('click', () => {
     S.f.tagMatch = S.f.tagMatch === 'any' ? 'all' : 'any';
     S.f.offset = 0;
@@ -886,7 +893,20 @@ function bindUi() {
   });
   $('#sort').addEventListener('change', (e) => { S.f.sort = e.target.value; S.f.offset = 0; loadMessages(); });
   $('#limit').addEventListener('change', (e) => { S.f.limit = Number(e.target.value); S.f.offset = 0; loadMessages(); });
-  $('#auto').addEventListener('change', (e) => { S.auto = e.target.checked; setupTimer(); });
+  $('#interval').addEventListener('change', (e) => {
+    LS.interval = Math.max(0, Math.min(Number(e.target.value) || 0, 3600));
+    setupTimer();
+    renderRefreshControl();
+    setStatus(refreshSecs() ? `auto-refresh: every ${fmtSecs(refreshSecs())}` : 'auto-refresh off');
+  });
+  $('#btn-theme').addEventListener('click', () => applyTheme(theme() === 'light' ? 'dark' : 'light'));
+  // coming back to a tab that has been refreshing (or not) in the background
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && refreshSecs()) refreshAll();
+  });
+  // follow the operating system until the user picks a side
+  const mq = window.matchMedia && matchMedia('(prefers-color-scheme: light)');
+  mq?.addEventListener?.('change', (e) => { if (!LS.theme) applyTheme(e.matches ? 'light' : 'dark'); });
 
   $('#bulk-delete').addEventListener('click', deleteSelected);
   $('#bulk-clear').addEventListener('click', () => { S.sel.clear(); renderMessages(); renderBulk(); });
@@ -935,16 +955,71 @@ window.addEventListener('pagehide', () => {
   }).catch(() => {});
 });
 
+// ---------------------------------------------------------------- refresh
+// One timer drives the whole board. Reloading only the message list would leave
+// the sidebar counts, the unread badges and the unassigned panel frozen at the
+// moment you last touched them, which is exactly what you notice when a message
+// lands in a channel you are not looking at.
+async function refreshAll() {
+  if (document.hidden || dragInfo) return; // a hidden tab needs no repaints; never fight a drag
+  const jobs = [loadMessages({ keepScroll: true }), loadTree()];
+  if (!$('#tag-filter-panel').classList.contains('hidden')) jobs.push(loadTags());
+  const out = await Promise.allSettled(jobs);
+  const failed = out.find((r) => r.status === 'rejected');
+  if (failed) setStatus(`refresh failed: ${failed.reason?.message || failed.reason}`, true);
+}
+
+function refreshSecs() {
+  const v = Number(LS.interval);
+  if (!Number.isFinite(v) || v < 0) return 15; // a broken value is not a reason to go silent
+  if (v === 0) return 0;
+  return Math.min(Math.max(Math.floor(v), 1), 3600); // "off" is exact; anything else is at least a second
+}
+
 function setupTimer() {
   clearInterval(S.timer);
-  if (!S.auto) return;
-  const secs = Math.max(2, S.interval || 15);
-  S.timer = setInterval(() => loadMessages({ keepScroll: true }), secs * 1000);
+  S.timer = null;
+  const secs = refreshSecs();
+  if (!secs) return;
+  S.timer = setInterval(refreshAll, secs * 1000);
+}
+
+// the toolbar select and the settings field are two views of one number
+function renderRefreshControl() {
+  const sel = $('#interval');
+  const secs = refreshSecs();
+  if (![...sel.options].some((o) => o.value === String(secs))) {
+    sel.append(el('option', { value: String(secs), text: `every ${secs} s` }));
+  }
+  sel.value = String(secs);
+  sel.title = secs
+    ? `the whole board — sidebar, counts and message list — reloads every ${fmtSecs(secs)}`
+    : 'auto-refresh is off: nothing reloads until you press the reload button';
+}
+
+function fmtSecs(n) {
+  return n < 120 ? `${n} s` : n < 7200 ? `${Math.round(n / 60)} min` : `${Math.round(n / 3600)} h`;
+}
+
+// -------------------------------------------------------------------- theme
+// The palette itself lives in style.css under [data-theme="light"]; here we only
+// decide which one is on, and remember the choice.
+function theme() {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
+function applyTheme(next) {
+  document.documentElement.dataset.theme = next;
+  LS.theme = next;
+  const b = $('#btn-theme');
+  b.textContent = next === 'light' ? '\u263E' : '\u2600'; // show the mode you would switch to
+  b.title = `Switch to ${next === 'light' ? 'dark' : 'light'} mode`;
+  b.setAttribute('aria-label', b.title);
 }
 
 function openSettings(note) {
   $('#set-token').value = LS.token;
-  $('#set-interval').value = S.interval || 15;
+  $('#set-interval').value = refreshSecs();
   $('#set-health').textContent = note ||
     `db: ${S.counts ? `${fmtNum(S.counts.messages)} messages stored` : '?'} · ` +
     `unassigned grace: ${S.pendingDays ?? 10} days` +
@@ -960,8 +1035,9 @@ function openSettings(note) {
   bindUi();
   $('#set-save').addEventListener('click', () => {
     LS.token = $('#set-token').value.trim();
-    LS.interval = Number($('#set-interval').value) || 15;
+    LS.interval = Math.max(0, Math.min(Number($('#set-interval').value) || 0, 3600));
     setupTimer();
+    renderRefreshControl();
     reload();
   });
   try {
@@ -972,6 +1048,8 @@ function openSettings(note) {
     setStatus(`server unreachable: ${err.message}`, true);
   }
   S.scope = readHash();
+  applyTheme(theme()); // sync the switch with whatever the pre-paint script decided
+  renderRefreshControl();
   await reload();
   setupTimer();
 })();
