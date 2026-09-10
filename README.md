@@ -15,6 +15,7 @@ channel "PC1"
 * **channels** group **threads**, threads collect **messages** over time
 * every message stores its own timestamp and length and is shown as a separate card
 * any message can carry any number of free-form **tags**
+* messages render as **markdown** on demand — for the whole board or one card
 * search everything, or just one thread / one channel — plain text or regex,
   filterable by tag and date range
 * channels and threads are created, renamed, reordered, moved and deleted in the UI
@@ -26,7 +27,9 @@ channel "PC1"
   **unassigned** and kept for 10 days unless you adopt it
 * storage is one SQLite file, no daemons besides this one, no accounts, no internet needed
 
-Stack: Node 20+, Express 5, better-sqlite3, vanilla JS/HTML/CSS front-end (no build step).
+Stack: Node 20+, Express 5, better-sqlite3, vanilla JS/HTML/CSS front-end (no build step;
+the markdown renderer and HTML sanitizer are npm packages served straight from
+`node_modules` at `/vendor`).
 
 ## 1. Run it
 
@@ -184,6 +187,17 @@ example for the channel or thread you are looking at.
 thread, length (`56 chars · 56 B`), and the posting source. Long bodies collapse; a
 message too big for the list gets a **load full text** link.
 
+**Markdown** — the `md` button in the filter row renders message bodies as
+GitHub-flavoured markdown (headings, tables, task lists, fenced code, links;
+bare newlines stay line breaks, which is what log text wants). The choice is
+remembered per browser and the raw log view stays the default. Every card also
+has its own `md` button that overrides the global setting for just that
+message; touching the global button clears those one-off choices. Rendering
+happens in the browser: `marked` turns the text into HTML, `DOMPurify` strips
+everything hostile from it (bodies are posted by scripts and treated as
+untrusted input), and both libraries are vendored npm packages served from
+`/vendor` — still no build step and no internet needed.
+
 **Searching** — type in the box (`/` focuses it):
 
 * `text` mode is a substring match, `regex` mode is a JavaScript regular expression;
@@ -302,13 +316,18 @@ unless you set `MV_TOKEN` — write too. It is meant for a trusted LAN or a tunn
   for a reverse proxy (nginx/caddy) in front of it.
 * The SQLite file *is* the database — back it up with `sqlite3 data/messages.db ".backup backup.db"`
   or stop the server and copy `messages.db*`.
+* Message bodies are untrusted input: the markdown view renders them through
+  DOMPurify, so scripts, event handlers and `javascript:` links do not survive;
+  the raw view is plain text either way.
 
 ## 7. Layout
 
 ```
 server.js                     HTTP API, static UI, sweeps
 lib/db.js                     schema, search, ordering, adopt/merge, expiry, read state
-public/index.html|app.js|style.css   front-end (no framework, no build);
+public/index.html|app.js|markdown.js|style.css
+                              front-end (no framework, no build); markdown.js wraps
+                              marked + DOMPurify, served by this app at /vendor;
                               style.css holds both theme palettes as CSS variables
 bin/mv-post                   POSIX shell posting helper
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
