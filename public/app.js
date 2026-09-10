@@ -1,5 +1,5 @@
 'use strict';
-/* message_viewer UI — no build step, no framework. Talks to /api/*. */
+/* logboard UI — no build step, no framework. Talks to /api/*. */
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const el = (tag, attrs = {}, ...kids) => {
@@ -16,23 +16,23 @@ const el = (tag, attrs = {}, ...kids) => {
 };
 
 const LS = {
-  get token() { return localStorage.getItem('mv.token') || ''; },
-  set token(v) { localStorage.setItem('mv.token', v || ''); },
+  get token() { return localStorage.getItem('lb.token') || ''; },
+  set token(v) { localStorage.setItem('lb.token', v || ''); },
   // 0 is a real value here: it means "do not refresh on a timer"
-  get interval() { const v = localStorage.getItem('mv.interval'); return v === null ? 15 : Number(v); },
-  set interval(v) { localStorage.setItem('mv.interval', String(v)); },
+  get interval() { const v = localStorage.getItem('lb.interval'); return v === null ? 15 : Number(v); },
+  set interval(v) { localStorage.setItem('lb.interval', String(v)); },
   // null until the user chooses, which means "follow the operating system"
-  get theme() { return localStorage.getItem('mv.theme'); },
-  set theme(v) { localStorage.setItem('mv.theme', v || ''); },
+  get theme() { return localStorage.getItem('lb.theme'); },
+  set theme(v) { localStorage.setItem('lb.theme', v || ''); },
   // markdown rendering of message bodies, off until the reader turns it on
-  get md() { return localStorage.getItem('mv.md') === '1'; },
-  set md(v) { localStorage.setItem('mv.md', v ? '1' : '0'); },
+  get md() { return localStorage.getItem('lb.md') === '1'; },
+  set md(v) { localStorage.setItem('lb.md', v ? '1' : '0'); },
   // Read state is per browser: one anonymous id per browser profile, no accounts.
   get reader() {
-    let v = localStorage.getItem('mv.reader');
+    let v = localStorage.getItem('lb.reader');
     if (!v) {
       v = (crypto.randomUUID ? crypto.randomUUID() : `r${Date.now()}${Math.random().toString(36).slice(2)}`);
-      localStorage.setItem('mv.reader', v);
+      localStorage.setItem('lb.reader', v);
     }
     return v;
   },
@@ -47,7 +47,7 @@ const S = {
   total: 0,
   messages: [],
   sel: new Set(),
-  expanded: new Set(JSON.parse(localStorage.getItem('mv.expanded') || '[]')),
+  expanded: new Set(JSON.parse(localStorage.getItem('lb.expanded') || '[]')),
   timer: null,
   // ids that arrived while this thread has been open; cleared when you leave it
   live: new Set(),
@@ -157,7 +157,7 @@ async function leaveThread() {
 // Title badge: how much is waiting, even when the tab is in the background.
 function renderTitle() {
   const unread = Number(S.counts?.unread || 0);
-  document.title = unread ? `(${fmtNum(unread)}) message_viewer` : 'message_viewer';
+  document.title = unread ? `(${fmtNum(unread)}) logboard` : 'logboard';
 }
 
 // --------------------------------------------------------------------- loading
@@ -398,7 +398,7 @@ function threadNode(channel, t) {
 }
 
 function saveExpanded() {
-  localStorage.setItem('mv.expanded', JSON.stringify([...S.expanded]));
+  localStorage.setItem('lb.expanded', JSON.stringify([...S.expanded]));
 }
 
 function renderCrumbs() {

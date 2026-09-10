@@ -1,0 +1,24 @@
+[Unit]
+Description=logboard log and message board
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/logboard
+Environment=NODE_ENV=production
+# copy these from your setup; LB_HOST=127.0.0.1 keeps it box-local only
+Environment=LB_PORT=8421
+Environment=LB_HOST=0.0.0.0
+Environment=LB_DB=/opt/logboard/data/messages.db
+# Environment=LB_TOKEN=change-me
+ExecStart=/usr/bin/node /opt/logboard/server.js
+Restart=on-failure
+RestartSec=2
+# keep the database off the systemd log; stdout/stderr are still journald-captured
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

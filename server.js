@@ -1,5 +1,5 @@
 'use strict';
-// message_viewer — local log/message board.
+// logboard — local log/message board.
 // HTTP API + static UI. Storage: SQLite (see lib/db.js).
 
 const path = require('path');
@@ -31,18 +31,18 @@ function parseArgs(argv) {
 
 const argv = parseArgs(process.argv.slice(2));
 if (argv.help) {
-  console.log(`message_viewer ${VERSION}
+  console.log(`logboard ${VERSION}
 
 usage: node server.js [--port 8421] [--host 0.0.0.0] [--db ./data/messages.db]
                       [--token SECRET] [--pending-days 10] [--max-body 8mb]
                       [--sweep-minutes 15] [--retention-days 0]
 
-env: MV_PORT, MV_HOST, MV_DB, MV_TOKEN, MV_PENDING_DAYS, MV_MAX_BODY, MV_SWEEP_MINUTES, MV_RETENTION_DAYS
+env: LB_PORT, LB_HOST, LB_DB, LB_TOKEN, LB_PENDING_DAYS, LB_MAX_BODY, LB_SWEEP_MINUTES, LB_RETENTION_DAYS
 `);
   process.exit(0);
 }
 
-// `MV_X=""` in a systemd unit or CI env means "unset", not "zero".
+// `LB_X=""` in a systemd unit or CI env means "unset", not "zero".
 const setting = (flag, env, fallback) => {
   if (flag !== undefined) return flag;
   const v = process.env[env];
@@ -50,14 +50,14 @@ const setting = (flag, env, fallback) => {
 };
 
 const CONFIG = {
-  port: Number(setting(argv.port, 'MV_PORT', 8421)),
-  host: setting(argv.host, 'MV_HOST', '0.0.0.0'),
-  db: setting(argv.db, 'MV_DB', path.join(__dirname, 'data', 'messages.db')),
-  token: setting(argv.token, 'MV_TOKEN', ''),
-  pendingDays: Number(setting(argv.pendingDays, 'MV_PENDING_DAYS', 10)),
-  retentionDays: Number(setting(argv.retentionDays, 'MV_RETENTION_DAYS', 0)),
-  maxBody: setting(argv.maxBody, 'MV_MAX_BODY', '8mb'),
-  sweepMinutes: Number(setting(argv.sweepMinutes, 'MV_SWEEP_MINUTES', 15)),
+  port: Number(setting(argv.port, 'LB_PORT', 8421)),
+  host: setting(argv.host, 'LB_HOST', '0.0.0.0'),
+  db: setting(argv.db, 'LB_DB', path.join(__dirname, 'data', 'messages.db')),
+  token: setting(argv.token, 'LB_TOKEN', ''),
+  pendingDays: Number(setting(argv.pendingDays, 'LB_PENDING_DAYS', 10)),
+  retentionDays: Number(setting(argv.retentionDays, 'LB_RETENTION_DAYS', 0)),
+  maxBody: setting(argv.maxBody, 'LB_MAX_BODY', '8mb'),
+  sweepMinutes: Number(setting(argv.sweepMinutes, 'LB_SWEEP_MINUTES', 15)),
 };
 
 const store = new Store(CONFIG.db, { pendingDays: CONFIG.pendingDays });
@@ -501,7 +501,7 @@ function maybeSweep() {
 }
 
 const server = app.listen(CONFIG.port, CONFIG.host, () => {
-  log(`message_viewer ${VERSION} on http://${CONFIG.host}:${CONFIG.port} (db: ${CONFIG.db})`);
+  log(`logboard ${VERSION} on http://${CONFIG.host}:${CONFIG.port} (db: ${CONFIG.db})`);
   if (CONFIG.host === '0.0.0.0') log('listening on all interfaces — restrict access to your LAN');
   if (!CONFIG.token) log('no token configured: anyone reachable can post and edit');
   if (retentionDays() > 0) log(`retention: messages older than ${retentionDays()} days are deleted`);

@@ -4,7 +4,7 @@
  * HTTP. No test framework, no mocks: it asserts the documented contract.
  *
  *   node test/smoke.mjs            # against a temp file database
- *   MV_TEST_DB=./data/x.db node test/smoke.mjs
+ *   LB_TEST_DB=./data/x.db node test/smoke.mjs
  */
 
 import { spawn } from 'node:child_process';
@@ -14,7 +14,7 @@ import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const ROOT = path.join(HERE, '..');
-const DB = process.env.MV_TEST_DB || path.join(os.tmpdir(), `mv-smoke-${process.pid}.db`);
+const DB = process.env.LB_TEST_DB || path.join(os.tmpdir(), `lb-smoke-${process.pid}.db`);
 const PORT = 8400 + (process.pid % 400);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -61,7 +61,7 @@ async function waitForServer(base) {
 async function main() {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js'), '--port', String(PORT), '--db', DB], {
     cwd: ROOT,
-    env: { ...process.env, MV_PORT: '', MV_DB: '', MV_TOKEN: '', MV_PENDING_DAYS: '10', MV_SWEEP_MINUTES: '60' },
+    env: { ...process.env, LB_PORT: '', LB_DB: '', LB_TOKEN: '', LB_PENDING_DAYS: '10', LB_SWEEP_MINUTES: '60' },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   child.on('exit', (code) => { if (code !== 0 && code !== null) console.error(`server exited early: ${code}`); });
@@ -327,7 +327,7 @@ async function main() {
     const tDb = `${DB}.token`;
     const guard = spawn(process.execPath, [path.join(ROOT, 'server.js'), '--port', String(tPort), '--db', tDb, '--token', 'hunter2'], {
       cwd: ROOT,
-      env: { ...process.env, MV_PORT: '', MV_DB: '', MV_TOKEN: '', MV_PENDING_DAYS: '10' },
+      env: { ...process.env, LB_PORT: '', LB_DB: '', LB_TOKEN: '', LB_PENDING_DAYS: '10' },
       stdio: ['ignore', 'ignore', 'inherit'],
     });
     try {
@@ -356,7 +356,7 @@ async function main() {
       const eDb = `${DB}.expiry`;
       const burner = spawn(process.execPath, [path.join(ROOT, 'server.js'), '--port', String(ePort), '--db', eDb, '--pending-days', '0', '--sweep-minutes', '600'], {
         cwd: ROOT,
-        env: { ...process.env, MV_PORT: '', MV_DB: '', MV_TOKEN: '', MV_PENDING_DAYS: '', MV_SWEEP_MINUTES: '' },
+        env: { ...process.env, LB_PORT: '', LB_DB: '', LB_TOKEN: '', LB_PENDING_DAYS: '', LB_SWEEP_MINUTES: '' },
         stdio: ['ignore', 'ignore', 'inherit'],
       });
       try {
