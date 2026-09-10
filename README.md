@@ -22,6 +22,8 @@ channel "PC1"
 * anything you have not looked at yet is marked **unread** — per browser, no accounts (§4)
 * dark and light theme, following the operating system until you pick one
 * an optional timer keeps the whole board fresh while the page sits open
+* the server can delete messages older than a retention window you set —
+  off by default, everything is kept forever
 * messages are only deletable and taggable — the text itself is immutable (it is a log)
 * posting to a channel or thread that does not exist works: the target is created as
   **unassigned** and kept for 10 days unless you adopt it
@@ -58,9 +60,13 @@ Command line flags win over environment variables.
 | `--pending-days` | `MV_PENDING_DAYS` | `10` | how long unassigned channels/threads survive |
 | `--max-body` | `MV_MAX_BODY` | `8mb` | largest single posted message |
 | `--sweep-minutes` | `MV_SWEEP_MINUTES` | `15` | how often expired targets are swept |
+| `--retention-days` | `MV_RETENTION_DAYS` | `0` | initial retention window; `0` keeps everything — ⚙ settings overrides it from then on (it lives in the db) |
 
-Nothing in the browser talks to the server that is not in §5; the theme, the refresh
-interval and the reader id live in that browser's `localStorage` only.
+Nothing in the browser talks to the server that is not in §5. Browser-local things —
+the theme, the refresh interval, the markdown toggle, the write token, the sidebar
+expansion and the reader id — live in that browser's `localStorage` only. Anything
+that changes what the board itself does, like the retention window, is stored in the
+database and edited in ⚙ settings.
 
 ```sh
 node server.js --port 9000 --db /var/lib/message_viewer/messages.db --token s3cret
@@ -250,6 +256,15 @@ remove it from that message, `+ tag` to add one (any new tag name is created).
 Tick boxes select several messages for a bulk delete. Use ⚙ settings to store a
 `MV_TOKEN` if the server needs one.
 
+**Retention & size** — ⚙ settings carries one server-wide switch: *delete
+messages older than N days*, with `0` meaning keep everything. It lives in the
+database (not in a browser), applies to every reader, needs the write token to
+change, and is enforced by the same sweep that handles unassigned expiry (§3) —
+at startup, every `MV_SWEEP_MINUTES`, and lazily while the sidebar refreshes.
+The line under the sidebar header counts the board: message, channel, thread
+and tag totals, the bytes of stored message bodies, and the sqlite file size —
+so you can watch what the logs actually cost.
+
 ## 5. HTTP API
 
 Reads need no token; every write needs one when `MV_TOKEN` is set — except the read-state
@@ -259,7 +274,7 @@ without it every `unread` is `0`/`false`.
 
 | method + path | body / query | effect |
 |---|---|---|
-| `GET /api/health` | — | version, time, `pending_days`, counters, `counts.unread` |
+| `GET /api/health` | — | version, time, `pending_days`, `retention_days`, counters, `db_bytes`, `counts.unread` (`counts.bytes` = stored message payload, `db_bytes` = the sqlite file with its WAL) |
 | `GET /api/tree` | — | channels → threads, with counts, `pending`, `expires_at`, `unread` per thread and channel |
 | `GET /api/tags` | — | tags with message counts |
 | `GET /api/messages` | `q`, `mode`, `cs`, `channel`, `thread`, `tags`, `tag_match`, `from`, `to`, `sort`, `limit`≤2000, `offset`, `truncate` | search; `truncate=0` returns whole bodies, default caps each at 8000 chars and sets `truncated`; each row carries `unread` |
@@ -279,9 +294,11 @@ without it every `unread` is `0`/`false`.
 | `DELETE /api/messages/:id` · `POST /api/messages/delete` | `{"ids":[1,2,3]}` | delete one / several |
 | `POST /api/tags/rename` | `{"from":"warn","to":"warning"}` | rename, merging into `to` if it exists |
 | `DELETE /api/tags/:idOrName` | — | detach tag everywhere and drop it |
-| `POST /api/admin/sweep` | — | delete expired unassigned targets now |
+| `POST /api/admin/sweep` | — | delete expired unassigned targets now; also enforces the retention window |
 | `POST /api/reads/:thread_id` | `last_id` (optional) | mark that thread seen up to `last_id` (default: newest) → `{"thread_id","marked","unread"}` |
 | `POST /api/reads` | `channel_id` = id or name (optional) | mark a whole channel, or the board, seen → `{"threads","marked"}` |
+| `GET /api/settings` | — | the server-wide settings: `{"retention_days":N}`, `0` = keep everything |
+| `POST /api/settings` | `{"retention_days":N}` | token-gated; enabling it deletes everything older right away |
 
 Errors come back as `{"ok":false,"error":"…"}` with 400 (bad input, invalid regex, or a
 read endpoint without an `x-reader` id), 401 (token), 404 (unknown id/name) or 409 (name in use).
@@ -343,6 +360,7 @@ data/messages.db              the database (gitignored)
 | `better-sqlite3` build errors on install | Node too old, or no prebuilt binary for it → use Node 20+ |
 | posted message invisible | it went to an **unassigned** target — check the Unassigned panel and adopt it |
 | old messages vanished on their own | an unassigned target expired (§3); adopt anything you want to keep |
+| old messages vanish on a schedule | retention is on — ⚙ settings holds the window (it is a server setting; another browser is not deleting them) |
 | `401 bad or missing token` | server runs with `MV_TOKEN`; send the header or set the token in ⚙ settings |
 | `413 body too large` | raise `--max-body` |
 | `400 invalid regex: …` | the pattern is not a valid JavaScript regex |
