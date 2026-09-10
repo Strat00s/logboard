@@ -48,6 +48,11 @@ const S = {
   messages: [],
   sel: new Set(),
   expanded: new Set(JSON.parse(localStorage.getItem('lb.expanded') || '[]')),
+  // messages whose full body the reader loaded via "load full text" — kept in
+  // localStorage so a card stays expanded across manual and automatic reloads
+  fullIds: new Set(JSON.parse(localStorage.getItem('lb.full') || '[]')),
+  // in-memory cache of those full bodies, keyed by id; repopulated on reload
+  fullBody: new Map(),
   timer: null,
   // ids that arrived while this thread has been open; cleared when you leave it
   live: new Set(),
@@ -212,6 +217,7 @@ async function loadMessages({ keepScroll = false } = {}) {
   }
   S.total = d.total;
   S.messages = d.messages;
+  await refillFullBodies();
   renderMessages();
   renderCrumbs();
   // restore after the new list exists, otherwise the offset is clamped to old content
@@ -399,6 +405,34 @@ function threadNode(channel, t) {
 
 function saveExpanded() {
   localStorage.setItem('lb.expanded', JSON.stringify([...S.expanded]));
+}
+
+function saveFull() {
+  localStorage.setItem('lb.full', JSON.stringify([...S.fullIds]));
+}
+
+// Fetch one message's full body and remember it, so the card renders fully
+// expanded and keeps doing so after any reload.
+async function loadFullText(id) {
+  const d = await api(`/api/messages/${id}`);
+  S.fullBody.set(id, d.message.body);
+  S.fullIds.add(id);
+  saveFull();
+}
+
+// On reload the list only carries truncated bodies, so re-fetch the full text of
+// every expanded message that is on this page before drawing it.
+async function refillFullBodies() {
+  const need = S.messages.filter((m) => m.truncated && S.fullIds.has(m.id) && !S.fullBody.has(m.id));
+  await Promise.all(need.map(async (m) => {
+    try {
+      const d = await api(`/api/messages/${m.id}`);
+      S.fullBody.set(m.id, d.message.body);
+    } catch {
+      S.fullIds.delete(m.id); // target is gone — stop retrying it
+      saveFull();
+    }
+  }));
 }
 
 function renderCrumbs() {
@@ -594,10 +628,15 @@ function messageCard(m, re) {
     }, 'delete'),
   );
 
-  const lines = m.body.split('\n').length;
-  const long = lines > 12 || m.chars > 1400;
-  const body = el(md ? 'div' : 'pre', { class: `msg-body${md ? ' md' : ''}${long ? ' collapsed' : ''}` });
-  fillBody(body, m.body, re, md);
+  // A reader who clicked "load full text" gets the whole body shown fully open,
+  // and that choice sticks across reloads (S.fullIds is in localStorage, the
+  // body itself is cached in S.fullBody and refetched on reload in loadMessages).
+  const hasFull = m.truncated && S.fullBody.has(m.id);
+  const shown = hasFull ? S.fullBody.get(m.id) : m.body;
+  const lines = shown.split('\n').length;
+  const long = !hasFull && (lines > 12 || m.chars > 1400);
+  const body = el(md ? 'div' : 'pre', { class: `msg-body${md ? ' md' : ''}${long ? ' collapsed' : ''}${hasFull ? ' full' : ''}` });
+  fillBody(body, shown, re, md);
   const foot = el('div', { class: 'msg-foot' }, tagWidgets(m));
 
   card.append(head, body);
@@ -606,14 +645,19 @@ function messageCard(m, re) {
       el('button', { class: 'expand', onclick: (e) => { const on = body.classList.toggle('collapsed'); e.target.textContent = on ? '▸ expand' : '▾ collapse'; } }, '▸ expand'));
     card.append(toggle);
   }
-  if (m.truncated) {
+  if (m.truncated && !hasFull) {
     card.append(el('div', { class: 'msg-foot' },
       el('button', {
         class: 'expand', text: 'message too long for the list — load full text',
         onclick: async (e) => {
-          const d = await api(`/api/messages/${m.id}`);
-          fillBody(body, d.message.body, re, md);
-          e.target.remove();
+          e.target.disabled = true;
+          try {
+            await loadFullText(m.id);
+            rerenderCard(m.id);
+          } catch (err) {
+            e.target.disabled = false;
+            setStatus(err.message, true);
+          }
         },
       })));
   }
