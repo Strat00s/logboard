@@ -83,6 +83,43 @@ systemctl enable --now message-viewer
 journalctl -u message-viewer -f
 ```
 
+### Run it in a container (docker / podman)
+
+The repo ships a `Dockerfile` (multi-stage: `npm ci --omit=dev`, then a slim
+Node 20 runtime running as the unprivileged `node` user) and a
+`docker-compose.yml` for `docker compose` or `podman-compose`.
+
+```sh
+docker compose up -d            # or: podman-compose up -d
+docker compose logs -f          # → http://<this machine>:8421
+docker compose down             # stops; the database volume survives
+```
+
+The sqlite file lives in the named volume `mv_data` at `/app/data`; the config
+flags from the table above all work as environment variables in the compose
+file (`MV_TOKEN`, `MV_RETENTION_DAYS`, …). Common knobs:
+
+```sh
+MV_TOKEN=s3cret docker compose up -d              # require a write token
+MV_PUBLISH=127.0.0.1:8421 docker compose up -d    # serve loopback only
+```
+
+Without compose:
+
+```sh
+docker build -t message_viewer .
+docker run -d --name message_viewer -p 8421:8421 \
+  -v mv_data:/app/data -e MV_TOKEN=s3cret --restart unless-stopped message_viewer
+```
+
+A bind mount instead of a named volume must be owned by uid 1000
+(the `node` user inside the image): `mkdir -p ./data && chown 1000:1000 ./data`.
+Backups work the same as §6: the volume's `messages.db*` files *are* the board.
+
+For podman, generate a systemd service from the same image with
+`podman generate systemd --new --name message_viewer` (or a `.container`
+quadlet unit) instead of the unit in `deploy/`.
+
 ## 2. Post from a script
 
 The posting endpoint is one `POST` with the channel, thread and tags named in the
@@ -349,6 +386,8 @@ public/index.html|app.js|markdown.js|style.css
 bin/mv-post                   POSIX shell posting helper
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
 deploy/message-viewer.service systemd unit
+Dockerfile                    multi-stage container image (node:20-slim, runs as uid 1000)
+docker-compose.yml            compose/podman-compose service; db in the mv_data volume
 data/messages.db              the database (gitignored)
 ```
 
@@ -363,5 +402,6 @@ data/messages.db              the database (gitignored)
 | old messages vanish on a schedule | retention is on — ⚙ settings holds the window (it is a server setting; another browser is not deleting them) |
 | `401 bad or missing token` | server runs with `MV_TOKEN`; send the header or set the token in ⚙ settings |
 | `413 body too large` | raise `--max-body` |
+| `podman build` cannot set up a network namespace (no `/dev/net/tun`) | build with `podman build --network=host` |
 | `400 invalid regex: …` | the pattern is not a valid JavaScript regex |
 | empty UI after a move/rename | the row is under another channel — the sidebar auto-expands the channel of the open thread |
