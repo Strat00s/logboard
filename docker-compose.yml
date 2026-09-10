@@ -1,0 +1,32 @@
+# message_viewer — docker-compose / podman-compose service
+#
+# start:  MV_TOKEN=s3cret docker compose up -d      (or: podman-compose up -d)
+# logs:   docker compose logs -f
+# stop:   docker compose down        (data survives in the named volume)
+#
+# The database lives in the `mv_data` volume at /app/data. Delete the volume
+# (`docker compose down -v`) only if you want to wipe the board.
+# Point MV_HOST at 127.0.0.1-style privacy by publishing the port to
+# loopback only: "127.0.0.1:8421:8421" below.
+
+services:
+  message_viewer:
+    build: .
+    image: message_viewer:latest
+    container_name: message_viewer
+    restart: unless-stopped
+    ports:
+      - "${MV_PUBLISH:-8421}:${MV_PORT:-8421}"
+    environment:
+      # write token: leave empty to allow anonymous posting
+      MV_TOKEN: ${MV_TOKEN:-}
+      # everything below is optional; defaults shown in comments
+      # MV_PENDING_DAYS: "10"      # unassigned targets live this long
+      # MV_MAX_BODY: 8mb           # largest single posted message
+      # MV_SWEEP_MINUTES: "15"     # expiry/retention sweep interval
+      # MV_RETENTION_DAYS: "0"     # 0 = keep messages forever
+    volumes:
+      - mv_data:/app/data
+
+volumes:
+  mv_data:

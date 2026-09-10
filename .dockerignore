@@ -1,0 +1,15 @@
+# build context: keep host cruft out of the image
+.git
+.gitignore
+node_modules
+data
+*.db
+*.db-shm
+*.db-wal
+npm-debug.log*
+deploy
+test
+README.md
+docker-compose.yml
+Dockerfile
+.dockerignore
