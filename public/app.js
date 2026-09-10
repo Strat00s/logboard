@@ -24,6 +24,9 @@ const LS = {
   // null until the user chooses, which means "follow the operating system"
   get theme() { return localStorage.getItem('mv.theme'); },
   set theme(v) { localStorage.setItem('mv.theme', v || ''); },
+  // markdown rendering of message bodies, off until the reader turns it on
+  get md() { return localStorage.getItem('mv.md') === '1'; },
+  set md(v) { localStorage.setItem('mv.md', v ? '1' : '0'); },
   // Read state is per browser: one anonymous id per browser profile, no accounts.
   get reader() {
     let v = localStorage.getItem('mv.reader');
@@ -49,6 +52,8 @@ const S = {
   // ids that arrived while this thread has been open; cleared when you leave it
   live: new Set(),
   seenThread: null,
+  // per-message markdown choices, overriding the global toggle (this view only)
+  mdOverride: new Map(),
 };
 
 // --------------------------------------------------------------------- helpers
@@ -498,6 +503,35 @@ function highlight(text, re) {
   return frag;
 }
 
+// Effective markdown mode for one message: its own toggle wins, else the
+// global one from localStorage.
+const mdOn = (id) => S.mdOverride.has(id) ? S.mdOverride.get(id) : LS.md;
+
+// Put a message body into its element, rendered or raw. A missing or broken
+// markdown library silently degrades to plain text.
+function fillBody(node, text, re, md) {
+  node.textContent = '';
+  const frag = md && window.MVmd ? window.MVmd.render(text) : null;
+  if (frag) { window.MVmd.highlightIn(frag, re); node.append(frag); }
+  else node.append(highlight(text, re));
+}
+
+// Rebuild one card in place, e.g. after flipping its markdown toggle.
+function rerenderCard(id) {
+  const m = S.messages.find((x) => x.id === id);
+  const old = document.querySelector(`#messages .msg[data-id="${id}"]`);
+  if (m && old) old.replaceWith(messageCard(m, highlightTarget()));
+}
+
+function renderMdControl() {
+  const b = $('#btn-md');
+  b.classList.toggle('on', LS.md);
+  b.textContent = LS.md ? 'md ✓' : 'md';
+  b.title = LS.md
+    ? 'messages render as markdown — click to go back to raw text'
+    : 'messages show raw text — click to render them as markdown';
+}
+
 function renderMessages() {
   const list = $('#messages');
   list.textContent = '';
@@ -527,6 +561,8 @@ function messageCard(m, re) {
     renderBulk();
   });
 
+  const md = mdOn(m.id);
+
   const head = el('div', { class: 'msg-head' },
     cb,
     el('span', {
@@ -544,6 +580,11 @@ function messageCard(m, re) {
     S.live.has(m.id) ? el('span', { class: 'new-flag', text: 'NEW' }) : null,
     el('span', { class: 'spacer' }),
     el('button', {
+      class: `btn small${md ? ' on' : ''}`,
+      title: md ? 'show this message as raw text' : 'render this message as markdown',
+      onclick: () => { S.mdOverride.set(m.id, !md); rerenderCard(m.id); },
+    }, 'md'),
+    el('button', {
       class: 'btn small',
       onclick: async () => { if (confirm(`Delete message #${m.id}?`)) await act(`/api/messages/${m.id}`, 'DELETE'); },
     }, 'delete'),
@@ -551,7 +592,8 @@ function messageCard(m, re) {
 
   const lines = m.body.split('\n').length;
   const long = lines > 12 || m.chars > 1400;
-  const body = el('pre', { class: `msg-body${long ? ' collapsed' : ''}` }, highlight(m.body, re));
+  const body = el(md ? 'div' : 'pre', { class: `msg-body${md ? ' md' : ''}${long ? ' collapsed' : ''}` });
+  fillBody(body, m.body, re, md);
   const foot = el('div', { class: 'msg-foot' }, tagWidgets(m));
 
   card.append(head, body);
@@ -566,9 +608,7 @@ function messageCard(m, re) {
         class: 'expand', text: 'message too long for the list — load full text',
         onclick: async (e) => {
           const d = await api(`/api/messages/${m.id}`);
-          body.textContent = '';
-          body.append(highlight(d.message.body, re));
-          body.classList.remove('collapsed');
+          fillBody(body, d.message.body, re, md);
           e.target.remove();
         },
       })));
@@ -900,6 +940,12 @@ function bindUi() {
     setStatus(refreshSecs() ? `auto-refresh: every ${fmtSecs(refreshSecs())}` : 'auto-refresh off');
   });
   $('#btn-theme').addEventListener('click', () => applyTheme(theme() === 'light' ? 'dark' : 'light'));
+  $('#btn-md').addEventListener('click', () => {
+    LS.md = !LS.md;
+    S.mdOverride.clear(); // a global flip outranks the per-card choices
+    renderMdControl();
+    renderMessages();
+  });
   // coming back to a tab that has been refreshing (or not) in the background
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && refreshSecs()) refreshAll();
@@ -1050,6 +1096,7 @@ function openSettings(note) {
   S.scope = readHash();
   applyTheme(theme()); // sync the switch with whatever the pre-paint script decided
   renderRefreshControl();
+  renderMdControl();
   await reload();
   setupTimer();
 })();

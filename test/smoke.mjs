@@ -306,6 +306,12 @@ async function main() {
 
     // ---------- misc contract details
     ok((await get('/api/nope')).status === 404, 'unknown route → 404');
+    for (const v of ['/vendor/marked.min.js', '/vendor/purify.min.js']) {
+      const res = await fetch(BASE + v);
+      const body = await res.text();
+      ok(res.status === 200 && /javascript/.test(res.headers.get('content-type') || ''), `${v} served as javascript`, res.headers.get('content-type'));
+      ok(body.length > 10_000, `${v} is a real library, not a stub`, body.length);
+    }
     ok((await req('POST', '/api/channels', { name: '' })).status === 400, 'empty channel name → 400');
     ok((await req('POST', '/api/channels', { name: 'a/b' })).status === 400, 'illegal character in name → 400');
     ok((await req('POST', '/api/threads', { channel_id: 999999, name: 'x' })).status === 404, 'thread in unknown channel → 404');

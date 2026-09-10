@@ -405,6 +405,20 @@ app.post('/api/reads', (req, res, next) => {
   res.json({ ok: true, channel_id: channel.id, ...store.markAllRead(req.reader, channel.id) });
 });
 
+// ---------------------------------------------------------------- vendor libs
+// The front-end markdown renderer (marked) and sanitizer (DOMPurify) are npm
+// dependencies served straight from node_modules: no build step, no bundler,
+// and the page still needs no internet.
+const VENDOR_FILES = {
+  '/vendor/marked.min.js': 'marked/lib/marked.umd.js',
+  '/vendor/purify.min.js': 'dompurify/dist/purify.min.js',
+};
+for (const [route, rel] of Object.entries(VENDOR_FILES)) {
+  app.get(route, (_req, res, next) => {
+    res.sendFile(path.join(__dirname, 'node_modules', rel), (err) => { if (err) next(err); });
+  });
+}
+
 // ------------------------------------------------------------------- static UI
 
 app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));

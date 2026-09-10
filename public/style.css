@@ -260,6 +260,44 @@ body {
   white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto;
 }
 .msg-body.collapsed { max-height: 190px; }
+
+/* ------------------------------------------------------ markdown bodies */
+/* Only shown when the reader turns markdown on (global or per message); the
+   raw view above keeps the pre-wrap monospace look. Colours come from the
+   same theme variables, so both palettes apply untouched. */
+.msg-body.md { white-space: normal; font: 13px/1.55 system-ui, sans-serif; }
+.msg-body.md > :first-child { margin-top: 0; }
+.msg-body.md > :last-child { margin-bottom: 0; }
+.msg-body.md h1, .msg-body.md h2, .msg-body.md h3,
+.msg-body.md h4, .msg-body.md h5, .msg-body.md h6 { margin: 12px 0 6px; line-height: 1.25; }
+.msg-body.md h1 { font-size: 17px; }
+.msg-body.md h2 { font-size: 15px; }
+.msg-body.md h3 { font-size: 14px; }
+.msg-body.md h4, .msg-body.md h5, .msg-body.md h6 { font-size: 13px; }
+.msg-body.md p, .msg-body.md ul, .msg-body.md ol,
+.msg-body.md blockquote, .msg-body.md table, .msg-body.md pre { margin: 6px 0; }
+.msg-body.md ul, .msg-body.md ol { padding-left: 22px; }
+.msg-body.md li { margin: 2px 0; }
+.msg-body.md blockquote {
+  border-left: 3px solid var(--line); background: var(--bg3); color: var(--dim);
+  padding: 4px 10px; border-radius: 0 4px 4px 0;
+}
+.msg-body.md code {
+  font: 12px var(--mono); background: var(--bg3); border: 1px solid var(--line);
+  border-radius: 3px; padding: 0 4px; color: var(--accent);
+}
+.msg-body.md pre {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+  padding: 8px 10px; overflow-x: auto;
+}
+.msg-body.md pre code { background: none; border: 0; padding: 0; color: var(--fg); }
+.msg-body.md table { border-collapse: collapse; font-size: 12.5px; }
+.msg-body.md th, .msg-body.md td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
+.msg-body.md th { background: var(--bg3); }
+.msg-body.md a { color: var(--accent); }
+.msg-body.md hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.msg-body.md img { max-width: 100%; }
+.msg-body.md del { color: var(--dim); }
 mark { background: var(--mark); color: var(--on-mark); border-radius: 2px; }
 .msg-foot { display: flex; align-items: center; gap: 5px; padding: 5px 10px; flex-wrap: wrap; }
 .mtag {
