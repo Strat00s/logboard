@@ -476,6 +476,7 @@ test/smoke.mjs                `npm test` — contract checks, boots its own serv
 deploy/logboard.service       systemd unit
 Dockerfile                    multi-stage container image (node:20-slim, runs as uid 1000)
 docker-compose.yml            compose/podman-compose service; db in the lb_data volume
+LICENSE                       GNU GPL v3.0, verbatim FSF text
 data/messages.db              the database (gitignored)
 ```
 
@@ -510,5 +511,13 @@ never touches `./data/messages.db`. Point it at a specific database with
 
 ## License
 
-MIT — see `package.json`. Provided as-is, with the caveats of the
+logboard is free software: you can redistribute it and/or modify it under the
+terms of the [GNU General Public License version 3](LICENSE)
+(`GPL-3.0-only`) — see the [`LICENSE`](LICENSE) file for the full text.
+
+The `npm install` dependencies (Express, better-sqlite3, marked, DOMPurify)
+carry their own, more permissive licenses; that restriction applies to them,
+not to this repository.
+
+Provided as-is, with the caveats of the
 [disclaimer](#--disclaimer--read-before-using) front and center.

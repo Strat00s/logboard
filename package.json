@@ -2,7 +2,7 @@
   "name": "logboard",
   "version": "1.0.0",
   "description": "Local web app for collecting logs and messages from scripts: channels, threads, tags, search.",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "private": true,
   "main": "server.js",
   "scripts": {
