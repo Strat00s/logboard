@@ -1,7 +1,15 @@
 # logboard
 
-A small, self-hosted board for logs and messages that your scripts post from
-different machines.
+A small, self-hosted web board where the scripts on all your machines post their
+logs and status messages — and you read everything in one place, from a browser.
+
+If your cron jobs, health checks and backups run on a dozen boxes and their
+output currently goes to e-mail or nowhere: point them at logboard instead. A
+script sends one `POST` (or one `lb-post` line) with a channel, a thread and
+some tags; the message shows up as a card in the web UI, where you can search,
+filter, tag and mark it. New channels and threads are created automatically, so
+a script never has to register first. Everything lives in a single SQLite file.
+No accounts, no daemons besides this one, no internet needed.
 
 ```
 channel "PC1"
@@ -12,14 +20,63 @@ channel "PC1"
               Reallocated_Sector_Ct 0  Temperature 36C
 ```
 
-* **channels** group **threads**, threads collect **messages** over time
-* every message stores its own timestamp and length and is shown as a separate card
-* any message can carry any number of free-form **tags**
-* messages render as **markdown** on demand — for the whole board or one card
+---
+
+> ## ⚠️ Disclaimer — read before using
+>
+> **This project was written 100 % by an LLM (Qwen 3.8), without line-by-line
+> human security review. It is not a secure web application.**
+>
+> There are no user accounts, no real authentication (at most one shared write
+> token), no HTTPS and no hardening of any kind. Anyone who can reach the port
+> can read everything on the board — and, unless you set a token, write to it
+> too.
+>
+> **Host it locally only:** on `localhost`, or on a network you fully control
+> and trust (home LAN, VPN, SSH tunnel). Do **not** expose it to the public
+> internet, and do not use it for secrets. If you are not sure your network
+> counts as safe, run it with `LB_HOST=127.0.0.1` and reach it through an SSH
+> tunnel (`ssh -L 8421:localhost:8421 host`).
+>
+> Use it, enjoy it, but treat every byte it stores as public to your LAN.
+
+---
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Quick start](#quick-start)
+- [Posting from a script](#posting-from-a-script)
+- [The web UI](#the-web-ui)
+- [Unassigned targets](#unassigned-targets)
+- [Configuration](#configuration)
+- [Running as a service](#running-as-a-service)
+- [HTTP API](#http-api)
+- [Security notes](#security-notes)
+- [Project layout](#project-layout)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+## What it does
+
+The board has exactly three kinds of objects:
+
+- a **channel** groups **threads** — typically one channel per machine
+  (`PC1`, `NAS`, `server7`);
+- a **thread** collects **messages** over time — one per recurring job
+  (`drive health`, `update check`, `backup`);
+- a **message** is one posted log entry. Its timestamp, length and source are
+  stored with it, it renders as its own card, and it can carry any number of
+  free-form **tags**.
+
+In addition to that core:
+
 * search everything, or just one thread / one channel — plain text or regex,
   filterable by tag and date range
 * channels and threads are created, renamed, reordered, moved and deleted in the UI
-* anything you have not looked at yet is marked **unread** — per browser, no accounts (§4)
+* anything you have not looked at yet is marked **unread** — per browser, no accounts
+* messages render as **markdown** on demand — for the whole board or one card
 * dark and light theme, following the operating system until you pick one
 * an optional timer keeps the whole board fresh while the page sits open
 * the server can delete messages older than a retention window you set —
@@ -27,27 +84,231 @@ channel "PC1"
 * messages are only deletable and taggable — the text itself is immutable (it is a log)
 * posting to a channel or thread that does not exist works: the target is created as
   **unassigned** and kept for 10 days unless you adopt it
-* storage is one SQLite file, no daemons besides this one, no accounts, no internet needed
+* storage is one SQLite file — back that one file up and you have backed up everything
 
-Stack: Node 20+, Express 5, better-sqlite3, vanilla JS/HTML/CSS front-end (no build step;
-the markdown renderer and HTML sanitizer are npm packages served straight from
-`node_modules` at `/vendor`).
+**Stack:** Node 20+, Express 5, better-sqlite3, vanilla JS/HTML/CSS front-end
+(no build step; the markdown renderer and HTML sanitizer are npm packages served
+straight from `node_modules` at `/vendor`).
 
-## 1. Run it
+## Quick start
+
+You need **Node 20 or newer** (`node --version`). No database server, no build
+toolchain, no internet access at runtime.
 
 ```sh
-cd /root/logboard
-npm install          # express + better-sqlite3
+git clone https://github.com/<you>/logboard.git
+cd logboard
+npm install          # express + better-sqlite3 (prebuilt binaries, compiles nothing)
 npm test             # optional: contract checks against a throwaway database
 npm start            # → http://<this machine>:8421
 ```
 
-`npm install` compiles nothing by hand: `better-sqlite3` ships prebuilt binaries.
-Node must be 20 or newer (`node --version`).
+Open `http://localhost:8421` and post your first message with the `curl` the
+UI shows you at the bottom of the sidebar:
 
-The database is created on first start at `./data/messages.db`.
+```sh
+curl -X POST http://localhost:8421/api/post \
+  -H 'content-type: application/json' \
+  -d '{"channel":"PC1","thread":"general","text":"hello logboard"}'
+```
 
-### Options
+The database is created on first start at `./data/messages.db`. That file *is*
+the whole board — see [Security notes](#security-notes) for backups.
+
+### Your first message never appears?
+
+A post creates any missing channel/thread for you, but as **unassigned** — it
+lands in the *Unassigned* panel at the top of the sidebar, not in the channel
+list, and expires after 10 days unless you click ✔ adopt. This is by design
+(scripts make typos); see [Unassigned targets](#unassigned-targets).
+
+## Posting from a script
+
+The posting endpoint is one `POST` with the channel, thread and tags named in
+the request. Missing targets are created for you, so a script never has to
+register first.
+
+```sh
+curl -X POST http://message-host:8421/api/post \
+  -H 'content-type: application/json' \
+  -d '{"channel":"PC1","thread":"drive health","tags":["smart","ok"],
+       "text":"SMART overall-health self-assessment test result: PASSED"}'
+```
+
+Raw text works too — target in headers, body is the message:
+
+```sh
+smartctl -a /dev/sda | curl -X POST --data-binary @- http://message-host:8421/api/post \
+  -H 'content-type: text/plain' -H 'X-Channel: PC1' -H 'X-Thread: drive health' -H 'X-Tags: smart'
+```
+
+### `bin/lb-post`
+
+A POSIX shell wrapper (uses `curl`, optional `python3` for JSON quoting) so cron
+jobs and `|| lb-post ...` traps stay short:
+
+```sh
+export LB_URL=http://message-host:8421          # default http://127.0.0.1:8421
+export LB_TOKEN=...                             # only if the server sets LB_TOKEN
+
+lb-post -c PC1 -t "drive health" -T smart -m "temperature 36C"
+echo "3 packages can be upgraded" | lb-post -c PC1 -t "update check" -T apt -T pending
+lb-post -c server7 -t backup -T zfs -f /var/log/backup-last-run.log
+lb-post -c NAS -t scrub -T error -q -m "scrub stopped with errors"   # -q: stay silent
+lb-post -c PC1 -t "drive health" --ts 2026-09-01T08:00:00Z -m "backdated note"
+lb-post --help
+```
+
+`--tag` is repeatable, text comes from `--message`, `--file`, or stdin, and the
+host name is recorded as the message source. New targets are reported:
+
+```
+posted #17 -> laptop9/battery report  26 chars  (NEW channel+thread — unassigned, expires 2026-09-20T01:02:11.510Z)
+```
+
+Real cron lines, one per machine:
+
+```cron
+@daily smartctl -H /dev/sda | lb-post -c "$(hostname -s)" -t "drive health" -T smart
+@weekly apt list --upgradable 2>/dev/null | lb-post -c "$(hostname -s)" -t "update check" -T apt
+@monthly zpool status tank | lb-post -c nas -t scrub -T zfs || lb-post -c nas -t scrub -T zfs -T error -m "zpool status failed"
+```
+
+### `POST /api/post` fields
+
+| field | aliases | default | notes |
+|---|---|---|---|
+| `channel` | `chan`, `c`, header `X-Channel`, `?channel=` | `default` | created if unknown |
+| `thread` | `topic`, `t`, header `X-Thread`, `?thread=` | `general` | created if unknown |
+| `text` | `body`, `message`, `msg`, `log` | — (required in JSON) | with a raw body the whole payload is the text |
+| `tags` | `tag`, header `X-Tags`, `?tags=` | — | array, or `"a,b"`, or `"a b"`; leading `#` stripped |
+| `ts` | `timestamp`, `time`, header `X-Ts`, `?ts=` | now | ISO-8601, `YYYY-MM-DD HH:MM:SS`, or epoch seconds |
+| `source` | `host`, `from`, header `X-Source` | — | free-form label shown in the UI |
+
+Names match case-insensitively, so `pc1` and `PC1` are one channel. The reply
+confirms ids, length, tags, and whether the targets were new:
+
+```json
+{ "ok": true,
+  "message": { "id": 42, "ts": "2026-09-10T01:02:11.510Z", "chars": 26, "bytes": 26,
+               "tags": ["smart"], "source": "cron@PC1" },
+  "channel": { "id": 5, "name": "PC1", "pending": false, "created": false, "expires_at": null },
+  "thread":  { "id": 7, "channel_id": 5, "name": "drive health", "pending": false, "created": false }
+```
+
+`201` means a channel or thread was created, `200` that everything already existed.
+
+## The web UI
+
+Open `http://<this machine>:8421`. Everything below happens in that one page —
+there is nothing else to install on the reading side.
+
+**Sidebar** — channels, each expandable into its threads with the `▸` / `▾` button.
+`⋮⋮` drags a channel or a thread into a new position (threads reorder inside their own
+channel). Hover a row for its actions: `＋` add thread, `✎` rename, `⇄` move thread to
+another channel, `🗑` delete. The row you are looking at is tinted and marked with an
+accent bar. Above the channels sits **Unassigned**; at the bottom, a `curl`
+example for the channel or thread you are looking at.
+
+**Message list** — newest first. Each card header carries the timestamp, id, channel /
+thread, length (`56 chars · 56 B`), and the posting source. Long bodies collapse; a
+message too big for the list gets a **load full text** link.
+
+**Markdown** — the `md` button in the filter row renders message bodies as
+GitHub-flavoured markdown (headings, tables, task lists, fenced code, links;
+bare newlines stay line breaks, which is what log text wants). The choice is
+remembered per browser and the raw log view stays the default. Every card also
+has its own `md` button that overrides the global setting for just that
+message; touching the global button clears those one-off choices. Rendering
+happens in the browser: `marked` turns the text into HTML, `DOMPurify` strips
+everything hostile from it (bodies are posted by scripts and treated as
+untrusted input), and both libraries are vendored npm packages served from
+`/vendor` — still no build step and no internet needed.
+
+**Searching** — type in the box (`/` focuses it):
+
+* `text` mode is a substring match, `regex` mode is a JavaScript regular expression;
+  `Aa` toggles case sensitivity
+* scope: click a channel or a thread in the sidebar; the crumbs line shows the scope,
+  and `✕ scope` returns to everything. Views are plain URLs (`#/thread/12`), so they
+  can be bookmarked
+* `tags:` opens a picker with counts; `ALL` requires every selected tag, `ANY` at least one
+* `from`/`to` date inputs, or a quick `last hour`/`24h`/`7 days`/`30 days` preset
+* sort order, page size (50–500) and prev/next paging
+
+Matches are highlighted in place.
+
+**Staying fresh** — the `refresh:` select in the filter row reloads the board on a
+timer: `off`, 5 s … 15 min, 1 h. ⚙ settings takes any exact number of seconds instead,
+and both controls show the same value; the choice is remembered per browser.
+
+A tick reloads *everything* — the sidebar with its counts and unread badges, the
+unassigned panel and the message list (the tag picker is refreshed on
+each tick while it is open, and once when you open it) — so a message posted to a
+channel you are not looking at shows up there too, without you doing anything.
+The list keeps your scroll position, and the timer pauses while the tab is hidden
+(returning to it refreshes at once) and while you are dragging a channel or thread.
+
+**Theme** — `☀` / `☾` in the top left switches between light and dark. Until you touch
+it the page follows the operating system, and your choice is remembered per browser.
+Every colour in the app is a CSS custom property, re-declared under
+`:root[data-theme="light"]` in `public/style.css`; both palettes are contrast-checked
+against WCAG in the UI test harness.
+
+**Unread** — read state is per browser: on its first request a browser gets an anonymous
+reader id (stored in `localStorage`, sent as `x-reader`), and everything already on the
+board counts as seen. After that:
+
+* a message that arrives in a thread you have not opened makes that thread and its
+  channel show an orange **count badge**, and the tab title reads `(3) logboard`
+* open such a thread and its unseen cards stay marked — an orange rule plus a `●` —
+  and anything that lands *while you are watching* gets a stronger **NEW** pill
+* **clicking away is what marks the thread as seen**; closing the tab counts too.
+  Channel and all-messages views only show markers, they never mark anything read
+* the crumbs line offers `mark N read` to clear the current scope by hand
+
+The id is deliberately anonymous: it only says *this browser has read up to here*. A
+watermark never moves backwards, so a message cannot silently become unread again —
+only a message that arrives later can raise the count. Deleting a thread drops its
+read state with it.
+
+**Message actions** — `delete`, plus tags: click a tag to filter by it, its `×` to
+remove it from that message, `+ tag` to add one (any new tag name is created).
+Tick boxes select several messages for a bulk delete. Use ⚙ settings to store a
+`LB_TOKEN` if the server needs one.
+
+**Retention & size** — ⚙ settings carries one server-wide switch: *delete
+messages older than N days*, with `0` meaning keep everything. It lives in the
+database (not in a browser), applies to every reader, needs the write token to
+change, and is enforced by the same sweep that handles unassigned expiry —
+at startup, every `LB_SWEEP_MINUTES`, and lazily while the sidebar refreshes.
+The line under the sidebar header counts the board: message, channel, thread
+and tag totals, the bytes of stored message bodies, and the sqlite file size —
+so you can watch what the logs actually cost.
+
+## Unassigned targets
+
+Scripts make typos, and new machines appear. A post for an unknown channel or
+thread does not fail — it creates the target under **Unassigned** in the sidebar
+instead, and keeps it for `LB_PENDING_DAYS` (default 10). Every new post to it
+restarts that clock, so a chatty mistake does not expire mid-flight.
+
+You then decide, per target:
+
+* ✔ **adopt** — the target becomes real, keeps its messages, and merges into an
+  existing same-named target if there is one. Adopting a *channel* adopts every thread
+  it collected; adopting a *thread* claims that thread and its channel but leaves
+  sibling threads unassigned for you to judge separately
+* ✖ **discard** — the target and everything inside it is deleted now
+* do nothing — expired targets and their messages are deleted by a sweep. It runs
+  at startup, every `LB_SWEEP_MINUTES`, and lazily while the sidebar refreshes (at most
+  once every 30 s), so an expired row never lingers in Unassigned. Reads never delete
+  anything outside that rate limit.
+
+Creating or adopting a channel named `PC1` while an unassigned `PC1` exists adopts it,
+so the usual "I meant to create that channel" case is one click and never loses messages.
+
+## Configuration
 
 Command line flags win over environment variables.
 
@@ -56,21 +317,26 @@ Command line flags win over environment variables.
 | `--port` | `LB_PORT` | `8421` | listen port |
 | `--host` | `LB_HOST` | `0.0.0.0` | bind address (`127.0.0.1` = this machine only) |
 | `--db` | `LB_DB` | `./data/messages.db` | SQLite file |
-| `--token` | `LB_TOKEN` | *(empty)* | shared secret needed to write (see §6) |
+| `--token` | `LB_TOKEN` | *(empty)* | shared secret needed to write (see [Security notes](#security-notes)) |
 | `--pending-days` | `LB_PENDING_DAYS` | `10` | how long unassigned channels/threads survive |
 | `--max-body` | `LB_MAX_BODY` | `8mb` | largest single posted message |
 | `--sweep-minutes` | `LB_SWEEP_MINUTES` | `15` | how often expired targets are swept |
 | `--retention-days` | `LB_RETENTION_DAYS` | `0` | initial retention window; `0` keeps everything — ⚙ settings overrides it from then on (it lives in the db) |
 
-Nothing in the browser talks to the server that is not in §5. Browser-local things —
-the theme, the refresh interval, the markdown toggle, the write token, the sidebar
-expansion and the reader id — live in that browser's `localStorage` only. Anything
-that changes what the board itself does, like the retention window, is stored in the
-database and edited in ⚙ settings.
+For example:
 
 ```sh
 node server.js --port 9000 --db /var/lib/logboard/messages.db --token s3cret
 ```
+
+**Where each setting lives.** Browser-local things — the theme, the refresh
+interval, the markdown toggle, the write token, the sidebar expansion and the
+reader id — live in that browser's `localStorage` only. Anything that changes
+what the board itself does, like the retention window, is stored in the database
+and edited in ⚙ settings. Nothing in the browser talks to the server that is not
+in the [HTTP API](#http-api).
+
+## Running as a service
 
 ### Keep it running with systemd
 
@@ -114,195 +380,13 @@ docker run -d --name logboard -p 8421:8421 \
 
 A bind mount instead of a named volume must be owned by uid 1000
 (the `node` user inside the image): `mkdir -p ./data && chown 1000:1000 ./data`.
-Backups work the same as §6: the volume's `messages.db*` files *are* the board.
+Backups work the same as always: the volume's `messages.db*` files *are* the board.
 
 For podman, generate a systemd service from the same image with
 `podman generate systemd --new --name logboard` (or a `.container`
 quadlet unit) instead of the unit in `deploy/`.
 
-## 2. Post from a script
-
-The posting endpoint is one `POST` with the channel, thread and tags named in the
-request. Missing targets are created for you, so a script never has to register first.
-
-```sh
-curl -X POST http://message-host:8421/api/post \
-  -H 'content-type: application/json' \
-  -d '{"channel":"PC1","thread":"drive health","tags":["smart","ok"],
-       "text":"SMART overall-health self-assessment test result: PASSED"}'
-```
-
-Raw text works too — target in headers, body is the message:
-
-```sh
-smartctl -a /dev/sda | curl -X POST --data-binary @- http://message-host:8421/api/post \
-  -H 'content-type: text/plain' -H 'X-Channel: PC1' -H 'X-Thread: drive health' -H 'X-Tags: smart'
-```
-
-### `bin/lb-post`
-
-A POSIX shell wrapper (uses `curl`, optional `python3` for JSON quoting) so cron
-jobs and `|| lb-post ...` traps stay short:
-
-```sh
-export LB_URL=http://message-host:8421          # default http://127.0.0.1:8421
-export LB_TOKEN=...                             # only if the server sets LB_TOKEN
-
-lb-post -c PC1 -t "drive health" -T smart -m "temperature 36C"
-echo "3 packages can be upgraded" | lb-post -c PC1 -t "update check" -T apt -T pending
-lb-post -c server7 -t backup -T zfs -f /var/log/backup-last-run.log
-lb-post -c NAS -t scrub -T error -q -m "scrub stopped with errors"   # -q: stay silent
-lb-post -c PC1 -t "drive health" --ts 2026-09-01T08:00:00Z -m "backdated note"
-lb-post --help
-```
-
-`--tag` is repeatable, text comes from `--message`, `--file`, or stdin, and the
-host name is recorded as the message source. New targets are reported:
-
-```
-posted #17 -> laptop9/battery report  26 chars  (NEW channel+thread — unassigned, expires 2026-09-20T01:02:11.510Z)
-```
-
-Real cron line, one per machine:
-
-```cron
-@daily smartctl -H /dev/sda | lb-post -c "$(hostname -s)" -t "drive health" -T smart
-@weekly apt list --upgradable 2>/dev/null | lb-post -c "$(hostname -s)" -t "update check" -T apt
-@monthly zpool status tank | lb-post -c nas -t scrub -T zfs || lb-post -c nas -t scrub -T zfs -T error -m "zpool status failed"
-```
-
-### `POST /api/post` fields
-
-| field | aliases | default | notes |
-|---|---|---|---|
-| `channel` | `chan`, `c`, header `X-Channel`, `?channel=` | `default` | created if unknown |
-| `thread` | `topic`, `t`, header `X-Thread`, `?thread=` | `general` | created if unknown |
-| `text` | `body`, `message`, `msg`, `log` | — (required in JSON) | with a raw body the whole payload is the text |
-| `tags` | `tag`, header `X-Tags`, `?tags=` | — | array, or `"a,b"`, or `"a b"`; leading `#` stripped |
-| `ts` | `timestamp`, `time`, header `X-Ts`, `?ts=` | now | ISO-8601, `YYYY-MM-DD HH:MM:SS`, or epoch seconds |
-| `source` | `host`, `from`, header `X-Source` | — | free-form label shown in the UI |
-
-Names match case-insensitively, so `pc1` and `PC1` are one channel. The reply
-confirms ids, length, tags, and whether the targets were new:
-
-```json
-{ "ok": true,
-  "message": { "id": 42, "ts": "2026-09-10T01:02:11.510Z", "chars": 26, "bytes": 26,
-               "tags": ["smart"], "source": "cron@PC1" },
-  "channel": { "id": 5, "name": "PC1", "pending": false, "created": false, "expires_at": null },
-  "thread":  { "id": 7, "channel_id": 5, "name": "drive health", "pending": false, "created": false }
-```
-
-`201` means a channel or thread was created, `200` that everything already existed.
-
-## 3. Unassigned targets
-
-Scripts make typos, and new machines appear. A post for an unknown target creates it
-under **Unassigned** in the sidebar instead of failing, and it is kept for
-`LB_PENDING_DAYS` (default 10). Every post to it restarts that clock, so a chatty
-mistake does not expire mid-flight.
-
-* ✔ **adopt** — the target becomes real, keeps its messages, and merges into an
-  existing same-named target if there is one. Adopting a *channel* adopts every thread
-  it collected; adopting a *thread* claims that thread and its channel but leaves
-  sibling threads unassigned for you to judge separately
-* ✖ **discard** — the target and everything inside it is deleted now
-* nothing happens — expired targets and their messages are deleted by a sweep. It runs
-  at startup, every `LB_SWEEP_MINUTES`, and lazily while the sidebar refreshes (at most
-  once every 30 s), so an expired row never lingers in Unassigned. Reads never delete
-  anything outside that rate limit.
-
-Creating or adopting a channel named `PC1` while an unassigned `PC1` exists adopts it,
-so the usual "I meant to create that channel" case is one click and never loses messages.
-
-## 4. The web UI
-
-Open `http://<this machine>:8421`.
-
-**Sidebar** — channels, each expandable into its threads with the `▸` / `▾` button.
-`⋮⋮` drags a channel or a thread into a new position (threads reorder inside their own
-channel). Hover a row for its actions: `＋` add thread, `✎` rename, `⇄` move thread to
-another channel, `🗑` delete. The row you are looking at is tinted and marked with an
-accent bar. Above the channels sits **Unassigned** (§3); at the bottom, a `curl`
-example for the channel or thread you are looking at.
-
-**Message list** — newest first. Each card header carries the timestamp, id, channel /
-thread, length (`56 chars · 56 B`), and the posting source. Long bodies collapse; a
-message too big for the list gets a **load full text** link.
-
-**Markdown** — the `md` button in the filter row renders message bodies as
-GitHub-flavoured markdown (headings, tables, task lists, fenced code, links;
-bare newlines stay line breaks, which is what log text wants). The choice is
-remembered per browser and the raw log view stays the default. Every card also
-has its own `md` button that overrides the global setting for just that
-message; touching the global button clears those one-off choices. Rendering
-happens in the browser: `marked` turns the text into HTML, `DOMPurify` strips
-everything hostile from it (bodies are posted by scripts and treated as
-untrusted input), and both libraries are vendored npm packages served from
-`/vendor` — still no build step and no internet needed.
-
-**Searching** — type in the box (`/` focuses it):
-
-* `text` mode is a substring match, `regex` mode is a JavaScript regular expression;
-  `Aa` toggles case sensitivity
-* scope: click a channel or a thread in the sidebar; the crumbs line shows the scope,
-  and `✕ scope` returns to everything. Views are plain URLs (`#/thread/12`), so they
-  can be bookmarked
-* `tags:` opens a picker with counts; `ALL` requires every selected tag, `ANY` at least one
-* `from`/`to` date inputs, or a quick `last hour`/`24h`/`7 days`/`30 days` preset
-* sort order, page size (50–500) and prev/next paging
-
-Matches are highlighted in place.
-
-**Staying fresh** — the `refresh:` select in the filter row reloads the board on a
-timer: `off`, 5 s … 15 min, 1 h. ⚙ settings takes any exact number of seconds instead,
-and both controls show the same value; the choice is remembered per browser.
-
-A tick reloads *everything* — the sidebar with its counts and unread badges, the
-unassigned panel and the message list (the tag picker is refreshed on
-each tick while it is open, and once when you open it) — so a message posted to a channel you are not looking at shows
-up there too, without you doing anything. The list
-keeps your scroll position, and the timer pauses while the tab is hidden (returning to
-it refreshes at once) and while you are dragging a channel or thread.
-
-**Theme** — `☀` / `☾` in the top left switches between light and dark. Until you touch
-it the page follows the operating system, and your choice is remembered per browser.
-Every colour in the app is a CSS custom property, re-declared under
-`:root[data-theme="light"]` in `public/style.css`; both palettes are contrast-checked
-against WCAG in the UI test harness.
-
-**Unread** — read state is per browser: on its first request a browser gets an anonymous
-reader id (stored in `localStorage`, sent as `x-reader`), and everything already on the
-board counts as seen. After that:
-
-* a message that arrives in a thread you have not opened makes that thread and its
-  channel show an orange **count badge**, and the tab title reads `(3) logboard`
-* open such a thread and its unseen cards stay marked — an orange rule plus a `●` —
-  and anything that lands *while you are watching* gets a stronger **NEW** pill
-* **clicking away is what marks the thread as seen**; closing the tab counts too.
-  Channel and all-messages views only show markers, they never mark anything read
-* the crumbs line offers `mark N read` to clear the current scope by hand
-
-The id is deliberately anonymous: it only says *this browser has read up to here*. A
-watermark never moves backwards, so a message cannot silently become unread again —
-only a message that arrives later can raise the count. Deleting a thread drops its
-read state with it.
-
-**Message actions** — `delete`, plus tags: click a tag to filter by it, its `×` to
-remove it from that message, `+ tag` to add one (any new tag name is created).
-Tick boxes select several messages for a bulk delete. Use ⚙ settings to store a
-`LB_TOKEN` if the server needs one.
-
-**Retention & size** — ⚙ settings carries one server-wide switch: *delete
-messages older than N days*, with `0` meaning keep everything. It lives in the
-database (not in a browser), applies to every reader, needs the write token to
-change, and is enforced by the same sweep that handles unassigned expiry (§3) —
-at startup, every `LB_SWEEP_MINUTES`, and lazily while the sidebar refreshes.
-The line under the sidebar header counts the board: message, channel, thread
-and tag totals, the bytes of stored message bodies, and the sqlite file size —
-so you can watch what the logs actually cost.
-
-## 5. HTTP API
+## HTTP API
 
 Reads need no token; every write needs one when `LB_TOKEN` is set — except the read-state
 endpoints, which only move that browser's own view of the board and so need an `x-reader`
@@ -316,7 +400,7 @@ without it every `unread` is `0`/`false`.
 | `GET /api/tags` | — | tags with message counts |
 | `GET /api/messages` | `q`, `mode`, `cs`, `channel`, `thread`, `tags`, `tag_match`, `from`, `to`, `sort`, `limit`≤2000, `offset`, `truncate` | search; `truncate=0` returns whole bodies, default caps each at 8000 chars and sets `truncated`; each row carries `unread` |
 | `GET /api/messages/:id` | — | one message, untruncated |
-| `POST /api/post` | §2 | post a message |
+| `POST /api/post` | [Posting from a script](#posting-from-a-script) | post a message |
 | `POST /api/channels` | `{"name":"NAS"}` | create channel — adopts an unassigned one of that name |
 | `PATCH /api/channels/:id` | `{"name":"NAS-box"}` | rename |
 | `POST /api/channels/reorder` | `{"ids":[3,1,2]}` | new channel order |
@@ -355,7 +439,10 @@ curl -G localhost:8421/api/messages \
 curl -G localhost:8421/api/messages -d thread=1 -d sort=asc -d limit=2000 -d truncate=0
 ```
 
-## 6. Security notes
+## Security notes
+
+⚠️ The [disclaimer](#--disclaimer--read-before-using) is the summary: this is an
+LLM-written, local-only tool. The details:
 
 Nothing here authenticates users: whoever can reach the port can read everything and —
 unless you set `LB_TOKEN` — write too. It is meant for a trusted LAN or a tunnel.
@@ -367,14 +454,15 @@ unless you set `LB_TOKEN` — write too. It is meant for a trusted LAN or a tunn
   off the network entirely; `LB_HOST=0.0.0.0` (default) serves the whole LAN —
   the startup log says so explicitly.
 * One shared token is the whole design; per-machine keys or TLS termination are jobs
-  for a reverse proxy (nginx/caddy) in front of it.
+  for a reverse proxy (nginx/caddy) in front of it — though remember that a proxy
+  does not make this app suitable for untrusted networks.
 * The SQLite file *is* the database — back it up with `sqlite3 data/messages.db ".backup backup.db"`
   or stop the server and copy `messages.db*`.
 * Message bodies are untrusted input: the markdown view renders them through
   DOMPurify, so scripts, event handlers and `javascript:` links do not survive;
   the raw view is plain text either way.
 
-## 7. Layout
+## Project layout
 
 ```
 server.js                     HTTP API, static UI, sweeps
@@ -385,23 +473,42 @@ public/index.html|app.js|markdown.js|style.css
                               style.css holds both theme palettes as CSS variables
 bin/lb-post                   POSIX shell posting helper
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
-deploy/logboard.service systemd unit
+deploy/logboard.service       systemd unit
 Dockerfile                    multi-stage container image (node:20-slim, runs as uid 1000)
 docker-compose.yml            compose/podman-compose service; db in the lb_data volume
 data/messages.db              the database (gitignored)
 ```
 
-## 8. Troubleshooting
+## Development
+
+There is no build step in either direction: the front-end is plain files served
+as-is, and the server is a single Node process.
+
+```sh
+npm test    # 150+ contract checks against a throwaway database
+npm run dev # node --watch server.js
+```
+
+`npm test` boots its own server instances against temporary sqlite files — it
+never touches `./data/messages.db`. Point it at a specific database with
+`LB_TEST_DB=./data/x.db node test/smoke.mjs`.
+
+## Troubleshooting
 
 | symptom | cause / fix |
 |---|---|
 | `EADDRINUSE` on start | another process owns the port → `--port` |
 | `better-sqlite3` build errors on install | Node too old, or no prebuilt binary for it → use Node 20+ |
 | posted message invisible | it went to an **unassigned** target — check the Unassigned panel and adopt it |
-| old messages vanished on their own | an unassigned target expired (§3); adopt anything you want to keep |
+| old messages vanished on their own | an unassigned target expired; adopt anything you want to keep |
 | old messages vanish on a schedule | retention is on — ⚙ settings holds the window (it is a server setting; another browser is not deleting them) |
 | `401 bad or missing token` | server runs with `LB_TOKEN`; send the header or set the token in ⚙ settings |
 | `413 body too large` | raise `--max-body` |
 | `podman build` cannot set up a network namespace (no `/dev/net/tun`) | build with `podman build --network=host` |
 | `400 invalid regex: …` | the pattern is not a valid JavaScript regex |
 | empty UI after a move/rename | the row is under another channel — the sidebar auto-expands the channel of the open thread |
+
+## License
+
+MIT — see `package.json`. Provided as-is, with the caveats of the
+[disclaimer](#--disclaimer--read-before-using) front and center.
