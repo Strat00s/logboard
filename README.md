@@ -19,6 +19,8 @@ channel "PC1"
   filterable by tag and date range
 * channels and threads are created, renamed, reordered, moved and deleted in the UI
 * anything you have not looked at yet is marked **unread** — per browser, no accounts (§4)
+* dark and light theme, following the operating system until you pick one
+* an optional timer keeps the whole board fresh while the page sits open
 * messages are only deletable and taggable — the text itself is immutable (it is a log)
 * posting to a channel or thread that does not exist works: the target is created as
   **unassigned** and kept for 10 days unless you adopt it
@@ -53,6 +55,9 @@ Command line flags win over environment variables.
 | `--pending-days` | `MV_PENDING_DAYS` | `10` | how long unassigned channels/threads survive |
 | `--max-body` | `MV_MAX_BODY` | `8mb` | largest single posted message |
 | `--sweep-minutes` | `MV_SWEEP_MINUTES` | `15` | how often expired targets are swept |
+
+Nothing in the browser talks to the server that is not in §5; the theme, the refresh
+interval and the reader id live in that browser's `localStorage` only.
 
 ```sh
 node server.js --port 9000 --db /var/lib/message_viewer/messages.db --token s3cret
@@ -188,10 +193,26 @@ message too big for the list gets a **load full text** link.
   can be bookmarked
 * `tags:` opens a picker with counts; `ALL` requires every selected tag, `ANY` at least one
 * `from`/`to` date inputs, or a quick `last hour`/`24h`/`7 days`/`30 days` preset
-* sort order, page size (50–500), prev/next paging, and `auto-refresh`
-  (interval in ⚙ settings) pulls in messages posted while the page sits open
+* sort order, page size (50–500) and prev/next paging
 
 Matches are highlighted in place.
+
+**Staying fresh** — the `refresh:` select in the filter row reloads the board on a
+timer: `off`, 5 s … 15 min, 1 h. ⚙ settings takes any exact number of seconds instead,
+and both controls show the same value; the choice is remembered per browser.
+
+A tick reloads *everything* — the sidebar with its counts and unread badges, the
+unassigned panel and the message list (the tag picker is refreshed on
+each tick while it is open, and once when you open it) — so a message posted to a channel you are not looking at shows
+up there too, without you doing anything. The list
+keeps your scroll position, and the timer pauses while the tab is hidden (returning to
+it refreshes at once) and while you are dragging a channel or thread.
+
+**Theme** — `☀` / `☾` in the top left switches between light and dark. Until you touch
+it the page follows the operating system, and your choice is remembered per browser.
+Every colour in the app is a CSS custom property, re-declared under
+`:root[data-theme="light"]` in `public/style.css`; both palettes are contrast-checked
+against WCAG in the UI test harness.
 
 **Unread** — read state is per browser: on its first request a browser gets an anonymous
 reader id (stored in `localStorage`, sent as `x-reader`), and everything already on the
@@ -287,7 +308,8 @@ unless you set `MV_TOKEN` — write too. It is meant for a trusted LAN or a tunn
 ```
 server.js                     HTTP API, static UI, sweeps
 lib/db.js                     schema, search, ordering, adopt/merge, expiry, read state
-public/index.html|app.js|style.css   front-end (no framework, no build)
+public/index.html|app.js|style.css   front-end (no framework, no build);
+                              style.css holds both theme palettes as CSS variables
 bin/mv-post                   POSIX shell posting helper
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
 deploy/message-viewer.service systemd unit
