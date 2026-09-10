@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>message_viewer</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📋</text></svg>">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="side-head">
+      <h1>message_viewer</h1>
+      <div class="side-actions">
+        <button id="btn-new-channel" class="btn small" title="New channel">+ channel</button>
+        <button id="btn-settings" class="btn small icon" title="Settings">&#9881;</button>
+      </div>
+    </div>
+    <div id="health" class="health"></div>
+
+    <section id="pending-panel" class="panel hidden">
+      <h2 class="panel-title">Unassigned <span id="pending-count" class="count"></span></h2>
+      <p class="hint" id="pending-hint"></p>
+      <ul id="pending-list" class="tree"></ul>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">
+        <a href="#" id="scope-all" class="all-link">All messages</a>
+        <span id="total-count" class="count"></span>
+      </h2>
+      <ul id="channel-list" class="tree"></ul>
+    </section>
+
+    <details class="panel help">
+      <summary>post from a script</summary>
+      <pre id="curl-example"></pre>
+    </details>
+  </aside>
+
+  <main id="main">
+    <div id="toolbar">
+      <div class="row">
+        <div class="search-box">
+          <input id="search" type="search" placeholder="search messages…  ( / to focus )" autocomplete="off" spellcheck="false">
+          <div class="search-modes">
+            <button id="mode-text" class="toggle on" title="plain substring match">text</button>
+            <button id="mode-regex" class="toggle" title="regular expression (JavaScript syntax)">regex</button>
+            <button id="mode-cs" class="toggle" title="case sensitive">Aa</button>
+          </div>
+        </div>
+        <button id="btn-clear-search" class="btn" title="Clear search text">clear</button>
+      </div>
+      <div class="row filters">
+        <button id="btn-tags" class="btn" title="filter by tags">tags: <b id="tags-label">none</b></button>
+        <button id="btn-tag-match" class="btn small" title="switch between AND / OR for tags">ALL</button>
+        <label class="field">from <input id="from" type="datetime-local" step="1"></label>
+        <label class="field">to <input id="to" type="datetime-local" step="1"></label>
+        <select id="preset" class="btn">
+          <option value="">dates: any</option>
+          <option value="-1h">last hour</option>
+          <option value="-24h">last 24h</option>
+          <option value="-7d">last 7 days</option>
+          <option value="-30d">last 30 days</option>
+        </select>
+        <select id="sort" class="btn">
+          <option value="desc">newest first</option>
+          <option value="asc">oldest first</option>
+        </select>
+        <select id="limit" class="btn">
+          <option value="50">50</option>
+          <option value="100" selected>100</option>
+          <option value="250">250</option>
+          <option value="500">500</option>
+        </select>
+        <span class="spacer"></span>
+        <label class="field auto"><input id="auto" type="checkbox" checked> auto&#8209;refresh</label>
+        <button id="btn-refresh" class="btn" title="reload (r)">&#8635;</button>
+      </div>
+      <div id="tag-filter-panel" class="tag-panel hidden"></div>
+    </div>
+
+    <div id="crumbs"></div>
+
+    <div id="composer" class="hidden">
+      <textarea id="compose-text" rows="4" placeholder="post a message to this thread…  (Ctrl+Enter to send)"></textarea>
+      <div class="row">
+        <input id="compose-tags" placeholder="tags, comma separated" spellcheck="false">
+        <button id="compose-send" class="btn primary">post</button>
+        <button id="compose-cancel" class="btn hidden">hide</button>
+      </div>
+    </div>
+
+    <div id="bulk-bar" class="hidden">
+      <span id="bulk-label"></span>
+      <button id="bulk-delete" class="btn danger">delete selected</button>
+      <button id="bulk-clear" class="btn">clear selection</button>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="messages"></div>
+    <div id="pager" class="pager"></div>
+  </main>
+</div>
+
+<dialog id="dlg-settings">
+  <form method="dialog">
+    <h2>Settings</h2>
+    <p class="hint">Server-to-server token. Leave empty when the server runs without <code>MV_TOKEN</code>. Stored in this browser only.</p>
+    <label class="field wide">token <input id="set-token" type="password" placeholder="MV_TOKEN value" spellcheck="false"></label>
+    <label class="field wide">auto-refresh interval (seconds) <input id="set-interval" type="number" min="2" max="3600" value="15"></label>
+    <p id="set-health" class="hint"></p>
+    <div class="row end">
+      <button value="cancel" class="btn">cancel</button>
+      <button value="ok" class="btn primary" id="set-save">save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

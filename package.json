@@ -1,0 +1,20 @@
+{
+  "name": "message_viewer",
+  "version": "1.0.0",
+  "description": "Local web app for collecting logs and messages from scripts: channels, threads, tags, search.",
+  "license": "MIT",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "express": "^5.2.1"
+  }
+}

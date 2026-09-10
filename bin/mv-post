@@ -1,0 +1,137 @@
+#!/bin/sh
+# mv-post — post a message to message_viewer from any script.
+#
+# Examples:
+#   echo "SMART overall-health passed" | mv-post -c PC1 -t "drive health" -T smart -T ok
+#   mv-post -c PC1 -t "update check" -T apt -m "updates available: 3"
+#   mv-post -c server7 -t "backup" -T warn -T zfs -f /var/log/backup.log
+#   mv-post -c PC1 -t "drive health" --ts "2026-09-01T08:00:00Z" -m "backdated note"
+#
+# env: MV_URL (default http://127.0.0.1:8421), MV_TOKEN (optional server token)
+
+set -eu
+
+URL="${MV_URL:-http://127.0.0.1:8421}"
+TOKEN="${MV_TOKEN:-}"
+CHANNEL=""
+THREAD=""
+TAGS=""
+TEXT=""
+FILE=""
+TS=""
+SOURCE="$(hostname 2>/dev/null || echo script)"
+QUIET=0
+
+usage() {
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  cat >&2 <<'EOF'
+
+options:
+  -c, --channel NAME   target channel (default: "default")
+  -t, --thread NAME    target thread   (default: "general")
+  -T, --tag TAG        add a tag (repeatable)
+  -m, --message TEXT   message text
+  -f, --file PATH      read message text from a file ("-" for stdin)
+      --ts ISO         override the message timestamp (ISO-8601, epoch seconds)
+      --source NAME    label shown in the UI (default: hostname)
+  -u, --url URL        server base URL (default: $MV_URL)
+  -k, --token TOKEN    server token (only needed when the server sets MV_TOKEN)
+  -q, --quiet          no output on success
+  -h, --help           this help
+EOF
+  exit 2
+}
+
+need_arg() { [ -n "${2:-}" ] || { echo "mv-post: $1 needs a value" >&2; exit 2; }; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -c|--channel)   need_arg "$1" "${2:-}"; CHANNEL="$2"; shift 2 ;;
+    -t|--thread)    need_arg "$1" "${2:-}"; THREAD="$2"; shift 2 ;;
+    -T|--tag)       need_arg "$1" "${2:-}"; TAGS="${TAGS:+$TAGS,}$2"; shift 2 ;;
+    -m|--message)   need_arg "$1" "${2:-}"; TEXT="$2"; shift 2 ;;
+    -f|--file)      need_arg "$1" "${2:-}"; FILE="$2"; shift 2 ;;
+    --ts)           need_arg "$1" "${2:-}"; TS="$2"; shift 2 ;;
+    --source)       need_arg "$1" "${2:-}"; SOURCE="$2"; shift 2 ;;
+    -u|--url)       need_arg "$1" "${2:-}"; URL="$2"; shift 2 ;;
+    -k|--token)     need_arg "$1" "${2:-}"; TOKEN="$2"; shift 2 ;;
+    -q|--quiet)     QUIET=1; shift ;;
+    -h|--help)      usage ;;
+    --)             shift; while [ $# -gt 0 ]; do TEXT="${TEXT:+$TEXT
+}$1"; shift; done ;;
+    *)              TEXT="${TEXT:+$TEXT
+}$1"; shift ;;
+  esac
+done
+
+if [ -z "$TEXT" ]; then
+  if [ -n "$FILE" ]; then
+    if [ "$FILE" = "-" ]; then TEXT=$(cat); else TEXT=$(cat -- "$FILE"); fi
+  elif [ ! -t 0 ]; then
+    TEXT=$(cat)
+  fi
+fi
+[ -n "$TEXT" ] || { echo "mv-post: nothing to post (use -m, -f or stdin)" >&2; exit 2; }
+
+command -v curl >/dev/null 2>&1 || { echo "mv-post: curl is required" >&2; exit 3; }
+
+# Build the JSON envelope; python3 is used for quoting when present, otherwise
+# a sed-based escaper handles the common cases.
+if command -v python3 >/dev/null 2>&1; then
+  BODY=$(MV_TEXT="$TEXT" MV_CHANNEL="$CHANNEL" MV_THREAD="$THREAD" MV_TAGS="$TAGS" \
+         MV_TS="$TS" MV_SOURCE="$SOURCE" python3 - <<'PY'
+import json, os
+tags = [t.strip() for t in os.environ.get("MV_TAGS", "").split(",") if t.strip()]
+env = {
+    "channel": os.environ.get("MV_CHANNEL") or "default",
+    "thread": os.environ.get("MV_THREAD") or "general",
+    "text": os.environ["MV_TEXT"],
+    "tags": tags,
+    "source": os.environ.get("MV_SOURCE") or None,
+}
+ts = os.environ.get("MV_TS")
+if ts:
+    env["ts"] = ts
+print(json.dumps({k: v for k, v in env.items() if v not in (None, [])}))
+PY
+)
+else
+  esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' | awk 'BEGIN{ORS="\\n"} {print}'; }
+  BODY="{\"channel\":\"$(esc "$CHANNEL")\",\"thread\":\"$(esc "$THREAD")\",\"text\":\"$(esc "$TEXT")\""
+  [ -n "$TAGS" ] && BODY="$BODY,\"tags\":[$(printf '%s' "$TAGS" | sed -e 's/^/"/' -e 's/,/","/g' -e 's/$/"/')]"
+  [ -n "$TS" ] && BODY="$BODY,\"ts\":\"$TS\""
+  BODY="$BODY}"
+fi
+
+POST_URL="${URL}/api/post"
+if [ -n "$TOKEN" ]; then
+  RESP=$(curl -sS -X POST -H 'content-type: application/json' -H "x-post-token: $TOKEN" \
+    --data-binary "$BODY" "$POST_URL" 2>&1) || RESP="{\"error\":\"could not reach $POST_URL\"}"
+else
+  RESP=$(curl -sS -X POST -H 'content-type: application/json' \
+    --data-binary "$BODY" "$POST_URL" 2>&1) || RESP="{\"error\":\"could not reach $POST_URL\"}"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  echo "$RESP" | MV_QUIET="$QUIET" python3 -c '
+import json, os, sys
+raw = sys.stdin.read()
+try:
+    d = json.loads(raw)
+except Exception:
+    print("mv-post:", raw.strip() or "no response", file=sys.stderr); sys.exit(1)
+if not d.get("ok"):
+    print("mv-post:", d.get("error", "unknown error"), file=sys.stderr); sys.exit(1)
+if os.environ.get("MV_QUIET") == "1":
+    sys.exit(0)
+m, c, t = d["message"], d["channel"], d["thread"]
+note = ""
+if c.get("created") or t.get("created"):
+    note = "  (NEW %s — unassigned, expires %s)" % (
+        "channel+thread" if c.get("created") and t.get("created") else "target",
+        (c if c.get("created") else t).get("expires_at"))
+print("posted #%s -> %s/%s  %s chars%s" % (m["id"], c["name"], t["name"], m["chars"], note))
+'
+else
+  echo "$RESP"
+fi

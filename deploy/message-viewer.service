@@ -1,0 +1,24 @@
+[Unit]
+Description=message_viewer log and message board
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/message_viewer
+Environment=NODE_ENV=production
+# copy these from your setup; MV_HOST=127.0.0.1 keeps it box-local only
+Environment=MV_PORT=8421
+Environment=MV_HOST=0.0.0.0
+Environment=MV_DB=/opt/message_viewer/data/messages.db
+# Environment=MV_TOKEN=change-me
+ExecStart=/usr/bin/node /opt/message_viewer/server.js
+Restart=on-failure
+RestartSec=2
+# keep the database off the systemd log; stdout/stderr are still journald-captured
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
