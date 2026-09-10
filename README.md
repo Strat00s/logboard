@@ -1,4 +1,4 @@
-# message_viewer
+# logboard
 
 A small, self-hosted board for logs and messages that your scripts post from
 different machines.
@@ -36,7 +36,7 @@ the markdown renderer and HTML sanitizer are npm packages served straight from
 ## 1. Run it
 
 ```sh
-cd /root/message_viewer
+cd /root/logboard
 npm install          # express + better-sqlite3
 npm test             # optional: contract checks against a throwaway database
 npm start            # → http://<this machine>:8421
@@ -53,14 +53,14 @@ Command line flags win over environment variables.
 
 | flag | env | default | meaning |
 |---|---|---|---|
-| `--port` | `MV_PORT` | `8421` | listen port |
-| `--host` | `MV_HOST` | `0.0.0.0` | bind address (`127.0.0.1` = this machine only) |
-| `--db` | `MV_DB` | `./data/messages.db` | SQLite file |
-| `--token` | `MV_TOKEN` | *(empty)* | shared secret needed to write (see §6) |
-| `--pending-days` | `MV_PENDING_DAYS` | `10` | how long unassigned channels/threads survive |
-| `--max-body` | `MV_MAX_BODY` | `8mb` | largest single posted message |
-| `--sweep-minutes` | `MV_SWEEP_MINUTES` | `15` | how often expired targets are swept |
-| `--retention-days` | `MV_RETENTION_DAYS` | `0` | initial retention window; `0` keeps everything — ⚙ settings overrides it from then on (it lives in the db) |
+| `--port` | `LB_PORT` | `8421` | listen port |
+| `--host` | `LB_HOST` | `0.0.0.0` | bind address (`127.0.0.1` = this machine only) |
+| `--db` | `LB_DB` | `./data/messages.db` | SQLite file |
+| `--token` | `LB_TOKEN` | *(empty)* | shared secret needed to write (see §6) |
+| `--pending-days` | `LB_PENDING_DAYS` | `10` | how long unassigned channels/threads survive |
+| `--max-body` | `LB_MAX_BODY` | `8mb` | largest single posted message |
+| `--sweep-minutes` | `LB_SWEEP_MINUTES` | `15` | how often expired targets are swept |
+| `--retention-days` | `LB_RETENTION_DAYS` | `0` | initial retention window; `0` keeps everything — ⚙ settings overrides it from then on (it lives in the db) |
 
 Nothing in the browser talks to the server that is not in §5. Browser-local things —
 the theme, the refresh interval, the markdown toggle, the write token, the sidebar
@@ -69,18 +69,18 @@ that changes what the board itself does, like the retention window, is stored in
 database and edited in ⚙ settings.
 
 ```sh
-node server.js --port 9000 --db /var/lib/message_viewer/messages.db --token s3cret
+node server.js --port 9000 --db /var/lib/logboard/messages.db --token s3cret
 ```
 
 ### Keep it running with systemd
 
 ```sh
-cp -r . /opt/message_viewer && cd /opt/message_viewer && npm install
-cp deploy/message-viewer.service /etc/systemd/system/
-editor /etc/systemd/system/message-viewer.service   # set MV_TOKEN, paths
+cp -r . /opt/logboard && cd /opt/logboard && npm install
+cp deploy/logboard.service /etc/systemd/system/
+editor /etc/systemd/system/logboard.service   # set LB_TOKEN, paths
 systemctl daemon-reload
-systemctl enable --now message-viewer
-journalctl -u message-viewer -f
+systemctl enable --now logboard
+journalctl -u logboard -f
 ```
 
 ### Run it in a container (docker / podman)
@@ -95,21 +95,21 @@ docker compose logs -f          # → http://<this machine>:8421
 docker compose down             # stops; the database volume survives
 ```
 
-The sqlite file lives in the named volume `mv_data` at `/app/data`; the config
+The sqlite file lives in the named volume `lb_data` at `/app/data`; the config
 flags from the table above all work as environment variables in the compose
-file (`MV_TOKEN`, `MV_RETENTION_DAYS`, …). Common knobs:
+file (`LB_TOKEN`, `LB_RETENTION_DAYS`, …). Common knobs:
 
 ```sh
-MV_TOKEN=s3cret docker compose up -d              # require a write token
-MV_PUBLISH=127.0.0.1:8421 docker compose up -d    # serve loopback only
+LB_TOKEN=s3cret docker compose up -d              # require a write token
+LB_PUBLISH=127.0.0.1:8421 docker compose up -d    # serve loopback only
 ```
 
 Without compose:
 
 ```sh
-docker build -t message_viewer .
-docker run -d --name message_viewer -p 8421:8421 \
-  -v mv_data:/app/data -e MV_TOKEN=s3cret --restart unless-stopped message_viewer
+docker build -t logboard .
+docker run -d --name logboard -p 8421:8421 \
+  -v lb_data:/app/data -e LB_TOKEN=s3cret --restart unless-stopped logboard
 ```
 
 A bind mount instead of a named volume must be owned by uid 1000
@@ -117,7 +117,7 @@ A bind mount instead of a named volume must be owned by uid 1000
 Backups work the same as §6: the volume's `messages.db*` files *are* the board.
 
 For podman, generate a systemd service from the same image with
-`podman generate systemd --new --name message_viewer` (or a `.container`
+`podman generate systemd --new --name logboard` (or a `.container`
 quadlet unit) instead of the unit in `deploy/`.
 
 ## 2. Post from a script
@@ -139,21 +139,21 @@ smartctl -a /dev/sda | curl -X POST --data-binary @- http://message-host:8421/ap
   -H 'content-type: text/plain' -H 'X-Channel: PC1' -H 'X-Thread: drive health' -H 'X-Tags: smart'
 ```
 
-### `bin/mv-post`
+### `bin/lb-post`
 
 A POSIX shell wrapper (uses `curl`, optional `python3` for JSON quoting) so cron
-jobs and `|| mv-post ...` traps stay short:
+jobs and `|| lb-post ...` traps stay short:
 
 ```sh
-export MV_URL=http://message-host:8421          # default http://127.0.0.1:8421
-export MV_TOKEN=...                             # only if the server sets MV_TOKEN
+export LB_URL=http://message-host:8421          # default http://127.0.0.1:8421
+export LB_TOKEN=...                             # only if the server sets LB_TOKEN
 
-mv-post -c PC1 -t "drive health" -T smart -m "temperature 36C"
-echo "3 packages can be upgraded" | mv-post -c PC1 -t "update check" -T apt -T pending
-mv-post -c server7 -t backup -T zfs -f /var/log/backup-last-run.log
-mv-post -c NAS -t scrub -T error -q -m "scrub stopped with errors"   # -q: stay silent
-mv-post -c PC1 -t "drive health" --ts 2026-09-01T08:00:00Z -m "backdated note"
-mv-post --help
+lb-post -c PC1 -t "drive health" -T smart -m "temperature 36C"
+echo "3 packages can be upgraded" | lb-post -c PC1 -t "update check" -T apt -T pending
+lb-post -c server7 -t backup -T zfs -f /var/log/backup-last-run.log
+lb-post -c NAS -t scrub -T error -q -m "scrub stopped with errors"   # -q: stay silent
+lb-post -c PC1 -t "drive health" --ts 2026-09-01T08:00:00Z -m "backdated note"
+lb-post --help
 ```
 
 `--tag` is repeatable, text comes from `--message`, `--file`, or stdin, and the
@@ -166,9 +166,9 @@ posted #17 -> laptop9/battery report  26 chars  (NEW channel+thread — unassign
 Real cron line, one per machine:
 
 ```cron
-@daily smartctl -H /dev/sda | mv-post -c "$(hostname -s)" -t "drive health" -T smart
-@weekly apt list --upgradable 2>/dev/null | mv-post -c "$(hostname -s)" -t "update check" -T apt
-@monthly zpool status tank | mv-post -c nas -t scrub -T zfs || mv-post -c nas -t scrub -T zfs -T error -m "zpool status failed"
+@daily smartctl -H /dev/sda | lb-post -c "$(hostname -s)" -t "drive health" -T smart
+@weekly apt list --upgradable 2>/dev/null | lb-post -c "$(hostname -s)" -t "update check" -T apt
+@monthly zpool status tank | lb-post -c nas -t scrub -T zfs || lb-post -c nas -t scrub -T zfs -T error -m "zpool status failed"
 ```
 
 ### `POST /api/post` fields
@@ -199,7 +199,7 @@ confirms ids, length, tags, and whether the targets were new:
 
 Scripts make typos, and new machines appear. A post for an unknown target creates it
 under **Unassigned** in the sidebar instead of failing, and it is kept for
-`MV_PENDING_DAYS` (default 10). Every post to it restarts that clock, so a chatty
+`LB_PENDING_DAYS` (default 10). Every post to it restarts that clock, so a chatty
 mistake does not expire mid-flight.
 
 * ✔ **adopt** — the target becomes real, keeps its messages, and merges into an
@@ -208,7 +208,7 @@ mistake does not expire mid-flight.
   sibling threads unassigned for you to judge separately
 * ✖ **discard** — the target and everything inside it is deleted now
 * nothing happens — expired targets and their messages are deleted by a sweep. It runs
-  at startup, every `MV_SWEEP_MINUTES`, and lazily while the sidebar refreshes (at most
+  at startup, every `LB_SWEEP_MINUTES`, and lazily while the sidebar refreshes (at most
   once every 30 s), so an expired row never lingers in Unassigned. Reads never delete
   anything outside that rate limit.
 
@@ -276,7 +276,7 @@ reader id (stored in `localStorage`, sent as `x-reader`), and everything already
 board counts as seen. After that:
 
 * a message that arrives in a thread you have not opened makes that thread and its
-  channel show an orange **count badge**, and the tab title reads `(3) message_viewer`
+  channel show an orange **count badge**, and the tab title reads `(3) logboard`
 * open such a thread and its unseen cards stay marked — an orange rule plus a `●` —
   and anything that lands *while you are watching* gets a stronger **NEW** pill
 * **clicking away is what marks the thread as seen**; closing the tab counts too.
@@ -291,20 +291,20 @@ read state with it.
 **Message actions** — `delete`, plus tags: click a tag to filter by it, its `×` to
 remove it from that message, `+ tag` to add one (any new tag name is created).
 Tick boxes select several messages for a bulk delete. Use ⚙ settings to store a
-`MV_TOKEN` if the server needs one.
+`LB_TOKEN` if the server needs one.
 
 **Retention & size** — ⚙ settings carries one server-wide switch: *delete
 messages older than N days*, with `0` meaning keep everything. It lives in the
 database (not in a browser), applies to every reader, needs the write token to
 change, and is enforced by the same sweep that handles unassigned expiry (§3) —
-at startup, every `MV_SWEEP_MINUTES`, and lazily while the sidebar refreshes.
+at startup, every `LB_SWEEP_MINUTES`, and lazily while the sidebar refreshes.
 The line under the sidebar header counts the board: message, channel, thread
 and tag totals, the bytes of stored message bodies, and the sqlite file size —
 so you can watch what the logs actually cost.
 
 ## 5. HTTP API
 
-Reads need no token; every write needs one when `MV_TOKEN` is set — except the read-state
+Reads need no token; every write needs one when `LB_TOKEN` is set — except the read-state
 endpoints, which only move that browser's own view of the board and so need an `x-reader`
 id instead of a token. Send `x-reader: <id>` on any read to have `unread` filled in;
 without it every `unread` is `0`/`false`.
@@ -358,13 +358,13 @@ curl -G localhost:8421/api/messages -d thread=1 -d sort=asc -d limit=2000 -d tru
 ## 6. Security notes
 
 Nothing here authenticates users: whoever can reach the port can read everything and —
-unless you set `MV_TOKEN` — write too. It is meant for a trusted LAN or a tunnel.
+unless you set `LB_TOKEN` — write too. It is meant for a trusted LAN or a tunnel.
 
-* `MV_TOKEN` gates every write (`-H 'x-post-token: …'`, `Authorization: Bearer …`, or
+* `LB_TOKEN` gates every write (`-H 'x-post-token: …'`, `Authorization: Bearer …`, or
   `?token=`). Reads are never gated: the token decides who may post and edit, while
   everyone who can reach the port can read the messages. Set it if posting rights matter.
-* `MV_HOST=127.0.0.1` plus an SSH tunnel (`ssh -L 8421:localhost:8421 host`) keeps it
-  off the network entirely; `MV_HOST=0.0.0.0` (default) serves the whole LAN —
+* `LB_HOST=127.0.0.1` plus an SSH tunnel (`ssh -L 8421:localhost:8421 host`) keeps it
+  off the network entirely; `LB_HOST=0.0.0.0` (default) serves the whole LAN —
   the startup log says so explicitly.
 * One shared token is the whole design; per-machine keys or TLS termination are jobs
   for a reverse proxy (nginx/caddy) in front of it.
@@ -383,11 +383,11 @@ public/index.html|app.js|markdown.js|style.css
                               front-end (no framework, no build); markdown.js wraps
                               marked + DOMPurify, served by this app at /vendor;
                               style.css holds both theme palettes as CSS variables
-bin/mv-post                   POSIX shell posting helper
+bin/lb-post                   POSIX shell posting helper
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
-deploy/message-viewer.service systemd unit
+deploy/logboard.service systemd unit
 Dockerfile                    multi-stage container image (node:20-slim, runs as uid 1000)
-docker-compose.yml            compose/podman-compose service; db in the mv_data volume
+docker-compose.yml            compose/podman-compose service; db in the lb_data volume
 data/messages.db              the database (gitignored)
 ```
 
@@ -400,7 +400,7 @@ data/messages.db              the database (gitignored)
 | posted message invisible | it went to an **unassigned** target — check the Unassigned panel and adopt it |
 | old messages vanished on their own | an unassigned target expired (§3); adopt anything you want to keep |
 | old messages vanish on a schedule | retention is on — ⚙ settings holds the window (it is a server setting; another browser is not deleting them) |
-| `401 bad or missing token` | server runs with `MV_TOKEN`; send the header or set the token in ⚙ settings |
+| `401 bad or missing token` | server runs with `LB_TOKEN`; send the header or set the token in ⚙ settings |
 | `413 body too large` | raise `--max-body` |
 | `podman build` cannot set up a network namespace (no `/dev/net/tun`) | build with `podman build --network=host` |
 | `400 invalid regex: …` | the pattern is not a valid JavaScript regex |
