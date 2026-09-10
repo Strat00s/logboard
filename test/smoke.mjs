@@ -340,6 +340,8 @@ async function main() {
       ok((await req('DELETE', '/api/channels/1', undefined, { base: tBase })).status === 401, 'delete without a token → 401');
       ok((await fetch(`${tBase}/api/channels/1`, { method: 'DELETE' })).status === 401, 'delete rejected even with the token in neither header nor query');
       ok((await (await fetch(`${tBase}/api/channels?token=hunter2`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'TokenChan' }) })).status) === 201, 'token via query param accepted');
+      ok((await get('/api/settings', tBase)).status === 200, 'settings readable without a token');
+      ok((await req('POST', '/api/settings', { retention_days: 30 }, { base: tBase })).status === 401, 'changing settings needs the token');
     } finally {
       guard.kill('SIGTERM');
       for (const suffix of ['', '-wal', '-shm']) {
@@ -379,6 +381,34 @@ async function main() {
           try { fs.rmSync(eDb + suffix, { force: true }); } catch { /* ignore */ }
         }
       }
+    }
+
+    // ---------- server settings: retention + board size counters
+    {
+      const h0 = (await get('/api/health')).data;
+      ok(h0.retention_days === 0, 'retention is off by default — keep everything', h0.retention_days);
+      ok(h0.counts.bytes > 0, 'health reports the stored message bytes', h0.counts);
+      ok(h0.db_bytes >= h0.counts.bytes, 'health reports the db file size', h0.db_bytes);
+      const s0 = (await get('/api/settings')).data.settings;
+      ok(s0.retention_days === 0, 'settings default to keep-everything', s0);
+      ok((await req('POST', '/api/settings', { retention_days: -2 })).status === 400, 'negative retention → 400');
+      ok((await req('POST', '/api/settings', { retention_days: 'soon' })).status === 400, 'non-numeric retention → 400');
+      ok((await req('POST', '/api/settings', {})).status === 400, 'missing retention_days → 400');
+      ok((await req('POST', '/api/settings', { retention_days: 45 })).status === 200, 'retention saved');
+      ok((await get('/api/settings')).data.settings.retention_days === 45, 'retention persisted');
+      const stale = await post({ channel: 'retention', thread: 'age', text: 'ancient log', ts: '-90d' });
+      const fresh = await post({ channel: 'retention', thread: 'age', text: 'current log' });
+      ok(stale.status === 201, 'backdated message accepted');
+      const swept = (await req('POST', '/api/admin/sweep')).data;
+      ok(swept.removed.messages >= 1, 'the sweep deletes messages past the cutoff', swept.removed);
+      ok((await get(`/api/messages/${stale.data.message.id}`)).status === 404, 'the old message is gone');
+      ok((await get(`/api/messages/${fresh.data.message.id}`)).status === 200, 'messages inside the window survive');
+      const stillThere = (await get('/api/messages?channel=retention')).data;
+      ok(stillThere.total === 1, 'the thread survives with its young messages', stillThere.total);
+      ok((await req('POST', '/api/settings', { retention_days: 0 })).status === 200, 'retention can be turned off again');
+      const stale2 = await post({ channel: 'retention', thread: 'age', text: 'kept ancient log', ts: '-90d' });
+      await req('POST', '/api/admin/sweep');
+      ok((await get(`/api/messages/${stale2.data.message.id}`)).status === 200, 'with retention off nothing expires');
     }
   }
   } finally {

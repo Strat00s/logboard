@@ -52,8 +52,8 @@ const S = {
   // ids that arrived while this thread has been open; cleared when you leave it
   live: new Set(),
   seenThread: null,
-  // per-message markdown choices, overriding the global toggle (this view only)
   mdOverride: new Map(),
+  retentionDays: null,
 };
 
 // --------------------------------------------------------------------- helpers
@@ -262,7 +262,11 @@ function scopeQuery() {
 function renderSidebar() {
   $('#health').textContent =
     `${fmtNum(S.counts.messages)} messages · ${fmtNum(S.counts.channels)} channels · ` +
-    `${fmtNum(S.counts.threads)} threads · ${fmtNum(S.counts.tags)} tags`;
+    `${fmtNum(S.counts.threads)} threads · ${fmtNum(S.counts.tags)} tags · ` +
+    `${fmtBytes(S.counts.bytes)} stored · ${fmtBytes(S.counts.db_bytes)} db`;
+  $('#health').title =
+    `${fmtBytes(S.counts.bytes)} of message bodies; the SQLite file (with its WAL) is ` +
+    `${fmtBytes(S.counts.db_bytes)} on the server`;
   $('#total-count').textContent = `${fmtNum(S.counts.messages)}`;
 
   // pending / unassigned
@@ -1063,7 +1067,7 @@ function applyTheme(next) {
   b.setAttribute('aria-label', b.title);
 }
 
-function openSettings(note) {
+async function openSettings(note) {
   $('#set-token').value = LS.token;
   $('#set-interval').value = refreshSecs();
   $('#set-health').textContent = note ||
@@ -1072,6 +1076,19 @@ function openSettings(note) {
     (S.counts?.pending_threads || S.counts?.pending_channels
       ? ` · ${fmtNum((S.counts.pending_threads || 0) + (S.counts.pending_channels || 0))} unassigned now`
       : '');
+  // server-wide settings live in the database, not in this browser
+  const ret = $('#set-retention');
+  ret.disabled = true;
+  ret.value = '';
+  ret.placeholder = 'loading…';
+  try {
+    const d = await api('/api/settings');
+    ret.value = d.settings.retention_days;
+    ret.placeholder = '';
+    ret.disabled = false;
+  } catch {
+    ret.placeholder = 'server unreachable';
+  }
   $('#dlg-settings').showModal();
 }
 
@@ -1079,16 +1096,30 @@ function openSettings(note) {
 
 (async function main() {
   bindUi();
-  $('#set-save').addEventListener('click', () => {
+  $('#set-save').addEventListener('click', async () => {
     LS.token = $('#set-token').value.trim();
     LS.interval = Math.max(0, Math.min(Number($('#set-interval').value) || 0, 3600));
     setupTimer();
     renderRefreshControl();
+    const ret = $('#set-retention');
+    const want = Number(ret.value);
+    if (!ret.disabled && ret.value !== '' && Number.isInteger(want) && want !== S.retentionDays) {
+      try {
+        const d = await api('/api/settings', { method: 'POST', body: { retention_days: want } });
+        S.retentionDays = d.settings.retention_days;
+        setStatus(d.deleted
+          ? `retention: deleted ${fmtNum(d.deleted)} old message(s)`
+          : `retention: ${d.settings.retention_days ? `keeping ${d.settings.retention_days} days` : 'keeping everything'}`);
+      } catch (err) {
+        setStatus(`retention: ${err.message}`, true);
+      }
+    }
     reload();
   });
   try {
     const h = await api('/api/health');
     S.pendingDays = h.pending_days;
+    S.retentionDays = h.retention_days;
     S.counts = h.counts;
   } catch (err) {
     setStatus(`server unreachable: ${err.message}`, true);

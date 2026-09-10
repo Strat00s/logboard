@@ -135,6 +135,8 @@
     <p class="hint">Server-to-server token. Leave empty when the server runs without <code>MV_TOKEN</code>. Stored in this browser only.</p>
     <label class="field wide">token <input id="set-token" type="password" placeholder="MV_TOKEN value" spellcheck="false"></label>
     <label class="field wide">auto-refresh interval, seconds (0 turns it off) <input id="set-interval" type="number" min="0" max="3600" value="15"></label>
+    <p class="hint">Below: server-wide settings — stored in the database, they apply to every browser; saving needs the write token. Everything above is remembered in this browser only.</p>
+    <label class="field wide">delete messages older than … days (0 keeps everything) <input id="set-retention" type="number" min="0" max="3650" value="0"></label>
     <p id="set-health" class="hint"></p>
     <div class="row end">
       <button value="cancel" class="btn">cancel</button>

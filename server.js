@@ -20,6 +20,7 @@ function parseArgs(argv) {
     else if (a === '--db' || a === '-d') out.db = next();
     else if (a === '--token' || a === '-k') out.token = next();
     else if (a === '--pending-days') out.pendingDays = Number(next());
+    else if (a === '--retention-days') out.retentionDays = Number(next());
     else if (a === '--sweep-minutes') out.sweepMinutes = Number(next());
     else if (a === '--max-body') out.maxBody = next();
     else if (a === '--help' || a === '--usage') out.help = true;
@@ -34,9 +35,9 @@ if (argv.help) {
 
 usage: node server.js [--port 8421] [--host 0.0.0.0] [--db ./data/messages.db]
                       [--token SECRET] [--pending-days 10] [--max-body 8mb]
-                      [--sweep-minutes 15]
+                      [--sweep-minutes 15] [--retention-days 0]
 
-env: MV_PORT, MV_HOST, MV_DB, MV_TOKEN, MV_PENDING_DAYS, MV_MAX_BODY, MV_SWEEP_MINUTES
+env: MV_PORT, MV_HOST, MV_DB, MV_TOKEN, MV_PENDING_DAYS, MV_MAX_BODY, MV_SWEEP_MINUTES, MV_RETENTION_DAYS
 `);
   process.exit(0);
 }
@@ -54,6 +55,7 @@ const CONFIG = {
   db: setting(argv.db, 'MV_DB', path.join(__dirname, 'data', 'messages.db')),
   token: setting(argv.token, 'MV_TOKEN', ''),
   pendingDays: Number(setting(argv.pendingDays, 'MV_PENDING_DAYS', 10)),
+  retentionDays: Number(setting(argv.retentionDays, 'MV_RETENTION_DAYS', 0)),
   maxBody: setting(argv.maxBody, 'MV_MAX_BODY', '8mb'),
   sweepMinutes: Number(setting(argv.sweepMinutes, 'MV_SWEEP_MINUTES', 15)),
 };
@@ -139,6 +141,13 @@ app.use((req, _res, next) => {
   next();
 });
 
+// Counts plus the db file footprint, so the sidebar can show what the board
+// costs without the browser having to ask twice.
+const boardCounts = (reader) => {
+  const c = store.counts(reader);
+  c.db_bytes = store.dbBytes();
+  return c;
+};
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -147,17 +156,37 @@ app.get('/api/health', (req, res) => {
     time: nowIso(),
     auth: !!CONFIG.token,
     pending_days: CONFIG.pendingDays,
-    counts: store.counts(req.reader),
+    retention_days: retentionDays(),
+    db_bytes: store.dbBytes(),
+    counts: boardCounts(req.reader),
   });
 });
 
 app.get('/api/tree', (req, res) => {
   maybeSweep();
-  res.json({ ok: true, channels: store.listChannels(req.reader), counts: store.counts(req.reader) });
+  res.json({ ok: true, channels: store.listChannels(req.reader), counts: boardCounts(req.reader) });
 });
 
 app.get('/api/tags', (req, res) => {
   res.json({ ok: true, tags: store.listTags() });
+});
+
+// Server-wide settings, persisted in the database (meta table). Reads are open
+// like everywhere else; changing one needs the write token, same as posts.
+app.get('/api/settings', (_req, res) => {
+  res.json({ ok: true, settings: { retention_days: retentionDays() } });
+});
+
+app.post('/api/settings', requireToken, (req, res, next) => {
+  const n = Number(req.body?.retention_days);
+  if (!Number.isInteger(n) || n < 0 || n > 3650) {
+    return next(new HttpError(400, 'retention_days must be a whole number of days, 0…3650; 0 keeps everything'));
+  }
+  store.setSetting('retention_days', n);
+  // Turning it on trims right away instead of waiting for the next sweep.
+  const deleted = n > 0 ? store.deleteOlderThan(n).messages : 0;
+  if (deleted) log(`retention: dropped ${deleted} message(s) older than ${n} days`);
+  res.json({ ok: true, settings: { retention_days: n }, deleted });
 });
 
 app.get('/api/messages/:id', (req, res, next) => {
@@ -450,7 +479,20 @@ function sweep() {
   lastSweepAt = Date.now();
   const r = store.sweepPending();
   if (r.channels || r.threads) log(`expired pending: ${r.channels} channel(s), ${r.threads} thread(s)`);
+  const days = retentionDays();
+  r.messages = 0;
+  if (days > 0) {
+    r.messages = store.deleteOlderThan(days).messages;
+    if (r.messages) log(`retention: dropped ${r.messages} message(s) older than ${days} days`);
+  }
   return r;
+}
+
+// Retention is a server setting kept in the db; the flag/env only seeds it
+// until someone changes it in ⚙ settings. 0 = keep everything.
+function retentionDays() {
+  const v = store.getSetting('retention_days');
+  return v === null ? CONFIG.retentionDays : Number(v);
 }
 
 function maybeSweep() {
@@ -462,6 +504,8 @@ const server = app.listen(CONFIG.port, CONFIG.host, () => {
   log(`message_viewer ${VERSION} on http://${CONFIG.host}:${CONFIG.port} (db: ${CONFIG.db})`);
   if (CONFIG.host === '0.0.0.0') log('listening on all interfaces — restrict access to your LAN');
   if (!CONFIG.token) log('no token configured: anyone reachable can post and edit');
+  if (retentionDays() > 0) log(`retention: messages older than ${retentionDays()} days are deleted`);
+  else log('retention: off — messages are kept forever');
   sweep();
 });
 
