@@ -24,8 +24,8 @@ channel "PC1"
 
 > ## ⚠️ Disclaimer — read before using
 >
-> **This project was written 100 % by an LLM (Qwen 3.8), without line-by-line
-> human security review. It is not a secure web application.**
+> **This project was written 100 % by an LLM (Qwen 3.8), without any human review
+> other than that it seems to be working. It is not a secure web application.**
 >
 > There are no user accounts, no real authentication (at most one shared write
 > token), no HTTPS and no hardening of any kind. Anyone who can reach the port
