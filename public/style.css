@@ -260,7 +260,7 @@ body {
   white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto;
 }
 .msg-body.collapsed { max-height: 190px; }
-/* fully opened via "load full text" — no clamp, no inner scrollbar */
+/* a card the reader opened with the expand toggle — no clamp, no inner scrollbar */
 .msg-body.full { max-height: none; overflow: visible; }
 
 /* ------------------------------------------------------ markdown bodies */

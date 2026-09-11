@@ -211,8 +211,10 @@ accent bar. Above the channels sits **Unassigned**; at the bottom, a `curl`
 example for the channel or thread you are looking at.
 
 **Message list** — newest first. Each card header carries the timestamp, id, channel /
-thread, length (`56 chars · 56 B`), and the posting source. Long bodies collapse; a
-message too big for the list gets a **load full text** link.
+thread, length (`56 chars · 56 B`), and the posting source. Long bodies collapse to a
+scroll box with an **expand** toggle below the card; a message too big for the list
+loads its full text on the first expand and then just opens and collapses. The choice
+is remembered per browser, so an opened card stays opened across reloads.
 
 **Markdown** — the `md` button in the filter row renders message bodies as
 GitHub-flavoured markdown (headings, tables, task lists, fenced code, links;
