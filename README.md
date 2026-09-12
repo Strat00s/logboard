@@ -270,6 +270,17 @@ renderer (`public/ansi.js`, no dependencies) only ever creates spans with
 fixed classes or self-generated hex colours, so it is as hostile-input-safe
 as the markdown view — and it stacks: markdown on, colours on, both apply.
 
+**Render defaults** — the `⚙` button on a channel or thread row stores
+*markdown* and *colours* defaults for that group **on the server**, where
+every browser shares them. They decide how messages look **when the page
+loads** (fresh visit or F5): a `MD` or `COLOR` tag on the message itself
+wins first, then the thread's default, then the channel's, then the global
+`md`/`col` buttons. After the load, the reader is back in charge — touching
+a global or per-card button outranks the defaults until the next page load.
+The automatic timer and the manual reload are *not* page loads: they never
+reset anything. So a script can tag its output to arrive pre-formatted, and
+a reader can point a whole channel at markdown once and forget it.
+
 **Searching** — type in the box (`/` focuses it):
 
 * `text` mode is a substring match, `regex` mode is a JavaScript regular expression;
@@ -441,18 +452,18 @@ without it every `unread` is `0`/`false`.
 | method + path | body / query | effect |
 |---|---|---|
 | `GET /api/health` | — | version, time, `pending_days`, `retention_days`, counters, `db_bytes`, `counts.unread` (`counts.bytes` = stored message payload, `db_bytes` = the sqlite file with its WAL) |
-| `GET /api/tree` | — | channels → threads, with counts, `pending`, `expires_at`, `unread` per thread and channel |
+| `GET /api/tree` | — | channels → threads, with counts, `pending`, `expires_at`, `unread` and `default_md`/`default_col` per target |
 | `GET /api/tags` | — | tags with message counts |
 | `GET /api/messages` | `q`, `mode`, `cs`, `channel`, `thread`, `tags`, `tag_match`, `from`, `to`, `sort`, `limit`≤2000, `offset`, `truncate` | search; `truncate=0` returns whole bodies, default caps each at 8000 chars and sets `truncated`; each row carries `unread` |
 | `GET /api/messages/:id` | — | one message, untruncated |
 | `POST /api/post` | [Posting from a script](#posting-from-a-script) | post a message |
 | `POST /api/channels` | `{"name":"NAS"}` | create channel — adopts an unassigned one of that name |
-| `PATCH /api/channels/:id` | `{"name":"NAS-box"}` | rename |
+| `PATCH /api/channels/:id` | `{"name":"NAS-box"}`, `{"default_md":true,"default_col":null}` | rename; render defaults (`true`/`false`/`null` = inherit) |
 | `POST /api/channels/reorder` | `{"ids":[3,1,2]}` | new channel order |
 | `POST /api/channels/:id/adopt` | — | make an unassigned channel real (adopting children too) |
 | `DELETE /api/channels/:id` | — | delete channel, threads and messages |
 | `POST /api/threads` | `{"channel_id":3,"name":"scrub"}` or `{"channel":"NAS",...}` | create thread |
-| `PATCH /api/threads/:id` | `{"name":"scrub status"}`, `{"channel_id":5}` or `{"channel":"NAS"}` | rename / move |
+| `PATCH /api/threads/:id` | `{"name":"scrub status"}`, `{"channel_id":5}`, `{"channel":"NAS"}`, `{"default_col":true}` | rename / move / render defaults |
 | `POST /api/threads/reorder` | `{"channel_id":3,"ids":[7,4]}` | new thread order |
 | `POST /api/threads/:id/adopt` | — | make an unassigned thread real |
 | `DELETE /api/threads/:id` | — | delete thread and its messages |
