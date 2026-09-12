@@ -263,6 +263,12 @@ app.post(
     }
     if (typeof body !== 'string') return next(new HttpError(400, 'message text must be a string'));
     if (!body.trim()) return next(new HttpError(400, 'empty message'));
+    // Scripts emit leading/trailing blank lines all the time; drop them, but
+    // keep every space and newline inside — the body is a log.
+    body = body
+      .replace(/\r\n/g, '\n')
+      .replace(/^(?:[^\S\n]*\n)+/, '')
+      .replace(/(?:\n[^\S\n]*)+$/, '');
 
     const { channel, thread, created } = store.resolveTarget(
       t.channel || 'default',
@@ -270,7 +276,7 @@ app.post(
     );
     const msg = store.addMessage({
       threadId: thread.id,
-      body: body.replace(/\r\n/g, '\n'),
+      body,
       ts: parseTs(t.ts) || nowIso(),
       tags: t.tags || [],
       source: t.source,

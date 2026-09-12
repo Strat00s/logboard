@@ -105,6 +105,11 @@ async function main() {
     const empty = await post({ channel: 'PC1', thread: 'drive health', text: '   ' });
     ok(empty.status === 400, 'blank message rejected', empty.status);
 
+    const padded = await post({ channel: 'PC1', thread: 'drive health', text: '\n \nfirst  \nmid\n \nlast \n\n  \n' });
+    const paddedStored = await get(`/api/messages/${padded.data.message.id}`);
+    ok(paddedStored.data.message.body === 'first  \nmid\n \nlast ',
+      'leading/trailing blank lines trimmed on post, inside kept', paddedStored.data.message.body);
+
     // ---------- channels and threads
     const chan = await req('POST', '/api/channels', { name: 'NAS' });
     ok(chan.status === 201 && chan.data.channel.pending === false, 'channel created as assigned', chan.data);
