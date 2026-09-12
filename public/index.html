@@ -146,6 +146,35 @@
   </form>
 </dialog>
 
+<dialog id="dlg-render">
+  <form method="dialog">
+    <h2>Render defaults</h2>
+    <p class="hint" id="render-target"></p>
+    <p class="hint">These apply when the page loads — a message tagged <code>MD</code> or
+    <code>COLOR</code> overrides them for itself. <em>Inherit</em> follows the channel,
+    then the global <code>md</code>/<code>col</code> toggles. Clicking a card&rsquo;s own
+    toggle still wins, until the next page load.</p>
+    <label class="field wide">markdown
+      <select id="render-md">
+        <option value="inherit">inherit</option>
+        <option value="on">render as markdown</option>
+        <option value="off">always raw text</option>
+      </select>
+    </label>
+    <label class="field wide">colours
+      <select id="render-col">
+        <option value="inherit">inherit</option>
+        <option value="on">render ANSI colours</option>
+        <option value="off">always raw text</option>
+      </select>
+    </label>
+    <div class="row end">
+      <button value="cancel" class="btn">cancel</button>
+      <button value="ok" class="btn primary" id="render-save">save</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/purify.min.js"></script>
 <script src="markdown.js"></script>

@@ -62,6 +62,14 @@ const S = {
   seenThread: null,
   mdOverride: new Map(),
   colOverride: new Map(),
+  // render defaults stored on the server per channel/thread (from the tree):
+  // {md: null|0|1, col: null|0|1}; the UI seeds its modes from them at load
+  chanDefs: new Map(),
+  threadDefs: new Map(),
+  // set once the reader touches the global md/col buttons this page load:
+  // from then on the browser-wide setting outranks the server defaults again
+  mdTouched: false,
+  colTouched: false,
   retentionDays: null,
 };
 
@@ -174,6 +182,8 @@ function renderTitle() {
 async function loadTree() {
   const d = await api('/api/tree');
   S.channels = d.channels;
+  S.chanDefs = new Map(d.channels.map((c) => [c.id, { md: c.default_md, col: c.default_col }]));
+  S.threadDefs = new Map(d.channels.flatMap((c) => c.threads.map((t) => [t.id, { md: t.default_md, col: t.default_col }])));
   S.counts = d.counts;
   renderSidebar();
   renderCrumbs();
@@ -375,6 +385,7 @@ function channelNode(c) {
     el('span', { class: 'row-actions' },
       el('button', { class: 'icon-btn', title: 'add thread', onclick: (e) => { e.stopPropagation(); createThread(c); } }, '＋'),
       el('button', { class: 'icon-btn', title: 'rename channel', onclick: (e) => { e.stopPropagation(); renameChannel(c); } }, '✎'),
+      el('button', { class: 'icon-btn', title: 'markdown / colour defaults for this channel', onclick: (e) => { e.stopPropagation(); openRenderDialog('channels', c.id, `"${c.name}"`, c); } }, '⚙'),
       el('button', { class: 'icon-btn danger', title: 'delete channel', onclick: (e) => { e.stopPropagation(); deleteChannel(c); } }, '🗑'),
     ));
   node.addEventListener('dragstart', onDragStart);
@@ -400,6 +411,7 @@ function threadNode(channel, t) {
     el('span', { class: 'row-actions' },
       el('button', { class: 'icon-btn', title: 'rename thread', onclick: (e) => { e.stopPropagation(); renameThread(channel, t); } }, '✎'),
       el('button', { class: 'icon-btn', title: 'move thread to another channel', onclick: (e) => { e.stopPropagation(); moveThread(channel, t); } }, '⇄'),
+      el('button', { class: 'icon-btn', title: 'markdown / colour defaults for this thread', onclick: (e) => { e.stopPropagation(); openRenderDialog('threads', t.id, `${channel.name} » ${t.name}`, t); } }, '⚙'),
       el('button', { class: 'icon-btn danger', title: 'delete thread', onclick: (e) => { e.stopPropagation(); deleteThread(channel, t); } }, '🗑'),
     ));
   node.addEventListener('dragstart', onDragStart);
@@ -541,10 +553,23 @@ function highlight(text, re) {
   return frag;
 }
 
-// Effective render mode for one message: the card's own toggle wins, else
-// the global one from localStorage.
-const mdOn = (id) => S.mdOverride.has(id) ? S.mdOverride.get(id) : LS.md;
-const colOn = (id) => S.colOverride.has(id) ? S.colOverride.get(id) : LS.col;
+// Effective render mode for one message, in precedence order: the card's own
+// toggle, else the browser-wide setting once the reader touched the global
+// button this page load, else the load-time default — an MD/COLOR tag on the
+// message itself, then the thread's default, then the channel's — and last
+// the browser-wide setting. Defaults therefore own the first paint after F5
+// and step back as soon as the reader expresses a preference.
+const defOf = (m, mode) => {
+  if (m.tags?.some((t) => t.toLowerCase() === (mode === 'md' ? 'md' : 'color'))) return true;
+  const v = S.threadDefs.get(m.thread_id)?.[mode] ?? S.chanDefs.get(m.channel_id)?.[mode];
+  return v === 1 ? true : v === 0 ? false : null;
+};
+const mdOn = (m) => S.mdOverride.has(m.id) ? S.mdOverride.get(m.id)
+  : S.mdTouched ? LS.md
+  : defOf(m, 'md') ?? LS.md;
+const colOn = (m) => S.colOverride.has(m.id) ? S.colOverride.get(m.id)
+  : S.colTouched ? LS.col
+  : defOf(m, 'col') ?? LS.col;
 
 // Put a message body into its element. `md` renders it as markdown (a missing
 // or broken library silently degrades to plain text); `col` interprets ANSI
@@ -619,8 +644,8 @@ function messageCard(m, re) {
     renderBulk();
   });
 
-  const md = mdOn(m.id);
-  const col = colOn(m.id);
+  const md = mdOn(m);
+  const col = colOn(m);
   // the text this card shows: a fetched full body if one was cached, else the
   // (possibly truncated) list body — computed early because the colour
   // button only earns its place when there are escape sequences to render
@@ -1020,17 +1045,18 @@ function bindUi() {
   $('#btn-theme').addEventListener('click', () => applyTheme(theme() === 'light' ? 'dark' : 'light'));
   $('#btn-md').addEventListener('click', () => {
     LS.md = !LS.md;
+    S.mdTouched = true; // until the next page load, the browser setting wins
     S.mdOverride.clear(); // a global flip outranks the per-card choices
     renderMdControl();
     renderMessages();
   });
   $('#btn-col').addEventListener('click', () => {
     LS.col = !LS.col;
+    S.colTouched = true;
     S.colOverride.clear(); // a global flip outranks the per-card choices
     renderColControl();
     renderMessages();
   });
-
   // coming back to a tab that has been refreshing (or not) in the background
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && refreshSecs()) refreshAll();
@@ -1173,6 +1199,19 @@ async function openSettings(note) {
   $('#dlg-settings').showModal();
 }
 
+// The per-channel/thread ⚙ dialog: pick the render defaults the board seeds
+// from on every page load. "inherit" leaves the decision to the channel,
+// then to each browser's global toggle.
+let renderTarget = null;
+function openRenderDialog(kind, id, label, target) {
+  renderTarget = { kind, id };
+  $('#render-target').textContent = `Default rendering for ${label}`;
+  const val = (v) => (v === 1 ? 'on' : v === 0 ? 'off' : 'inherit');
+  $('#render-md').value = val(target.default_md);
+  $('#render-col').value = val(target.default_col);
+  $('#dlg-render').showModal();
+}
+
 // ----------------------------------------------------------------------- boot
 
 (async function main() {
@@ -1196,6 +1235,21 @@ async function openSettings(note) {
       }
     }
     reload();
+  });
+  $('#render-save').addEventListener('click', async () => {
+    if (!renderTarget) return;
+    const to = (v) => (v === 'on' ? true : v === 'off' ? false : null);
+    try {
+      await api(`/api/${renderTarget.kind}/${renderTarget.id}`, {
+        method: 'PATCH',
+        body: { default_md: to($('#render-md').value), default_col: to($('#render-col').value) },
+      });
+      await loadTree();
+      renderMessages(); // defaults changed under the reader: repaint at once
+      setStatus('render defaults saved');
+    } catch (err) {
+      setStatus(err.message, true);
+    }
   });
   try {
     const h = await api('/api/health');
