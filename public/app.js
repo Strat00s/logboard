@@ -27,6 +27,9 @@ const LS = {
   // markdown rendering of message bodies, off until the reader turns it on
   get md() { return localStorage.getItem('lb.md') === '1'; },
   set md(v) { localStorage.setItem('lb.md', v ? '1' : '0'); },
+  // ANSI colour rendering of message bodies, same deal
+  get col() { return localStorage.getItem('lb.col') === '1'; },
+  set col(v) { localStorage.setItem('lb.col', v ? '1' : '0'); },
   // Read state is per browser: one anonymous id per browser profile, no accounts.
   get reader() {
     let v = localStorage.getItem('lb.reader');
@@ -58,6 +61,7 @@ const S = {
   live: new Set(),
   seenThread: null,
   mdOverride: new Map(),
+  colOverride: new Map(),
   retentionDays: null,
 };
 
@@ -537,17 +541,28 @@ function highlight(text, re) {
   return frag;
 }
 
-// Effective markdown mode for one message: its own toggle wins, else the
-// global one from localStorage.
+// Effective render mode for one message: the card's own toggle wins, else
+// the global one from localStorage.
 const mdOn = (id) => S.mdOverride.has(id) ? S.mdOverride.get(id) : LS.md;
+const colOn = (id) => S.colOverride.has(id) ? S.colOverride.get(id) : LS.col;
 
-// Put a message body into its element, rendered or raw. A missing or broken
-// markdown library silently degrades to plain text.
-function fillBody(node, text, re, md) {
+// Put a message body into its element. `md` renders it as markdown (a missing
+// or broken library silently degrades to plain text); `col` interprets ANSI
+// SGR escapes as colours — over the raw text, or over the rendered markdown,
+// whose text nodes keep the escape bytes marked does not touch. With `col`
+// off the sequences are simply visible characters, as always.
+function fillBody(node, text, re, md, col) {
   node.textContent = '';
   const frag = md && window.MVmd ? window.MVmd.render(text) : null;
-  if (frag) { window.MVmd.highlightIn(frag, re); node.append(frag); }
-  else node.append(highlight(text, re));
+  if (frag) {
+    if (col && window.MAnsi) window.MAnsi.transform(frag);
+    window.MVmd.highlightIn(frag, re);
+    node.append(frag);
+    return;
+  }
+  const raw = highlight(text, re);
+  if (col && window.MAnsi) window.MAnsi.transform(raw);
+  node.append(raw);
 }
 
 // Rebuild one card in place, e.g. after flipping its markdown toggle.
@@ -564,6 +579,15 @@ function renderMdControl() {
   b.title = LS.md
     ? 'messages render as markdown — click to go back to raw text'
     : 'messages show raw text — click to render them as markdown';
+}
+
+function renderColControl() {
+  const b = $('#btn-col');
+  b.classList.toggle('on', LS.col);
+  b.textContent = LS.col ? 'col ✓' : 'col';
+  b.title = LS.col
+    ? 'ANSI escape colours are shown — click to see the raw text instead'
+    : 'escape sequences show as raw text — click to render their colours';
 }
 
 function renderMessages() {
@@ -596,6 +620,12 @@ function messageCard(m, re) {
   });
 
   const md = mdOn(m.id);
+  const col = colOn(m.id);
+  // the text this card shows: a fetched full body if one was cached, else the
+  // (possibly truncated) list body — computed early because the colour
+  // button only earns its place when there are escape sequences to render
+  const shown = m.truncated && S.fullBody.has(m.id) ? S.fullBody.get(m.id) : m.body;
+  const ansi = window.MAnsi && (col || m.truncated || window.MAnsi.has(shown));
 
   const head = el('div', { class: 'msg-head' },
     cb,
@@ -611,13 +641,16 @@ function messageCard(m, re) {
       m.thread_pending || m.channel_pending ? el('span', { class: 'src', text: ' (unassigned)' }) : null),
     el('span', { class: 'len', title: `${fmtBytes(m.bytes)} on disk`, text: `${fmtNum(m.chars)} chars · ${fmtBytes(m.bytes)}` }),
     m.source ? el('span', { class: 'src', text: `via ${m.source}` }) : null,
-    S.live.has(m.id) ? el('span', { class: 'new-flag', text: 'NEW' }) : null,
-    el('span', { class: 'spacer' }),
     el('button', {
       class: `btn small${md ? ' on' : ''}`,
       title: md ? 'show this message as raw text' : 'render this message as markdown',
       onclick: () => { S.mdOverride.set(m.id, !md); rerenderCard(m.id); },
     }, 'md'),
+    ansi && el('button', {
+      class: `btn small${col ? ' on' : ''}`,
+      title: col ? 'strip the ANSI colours from this message' : 'show the ANSI escape colours in this message',
+      onclick: () => { S.colOverride.set(m.id, !col); rerenderCard(m.id); },
+    }, 'col'),
     el('button', {
       class: 'btn small',
       onclick: async () => { if (confirm(`Delete message #${m.id}?`)) await act(`/api/messages/${m.id}`, 'DELETE'); },
@@ -631,10 +664,9 @@ function messageCard(m, re) {
   // full body is refetched on reload for cards that are still open.
   const hasFull = m.truncated && S.fullBody.has(m.id);
   const expanded = S.msgExpanded.has(m.id) && (!m.truncated || hasFull);
-  const shown = hasFull ? S.fullBody.get(m.id) : m.body;
   const clamp = m.truncated || shown.split('\n').length > 25 || m.chars > 2800;
   const body = el(md ? 'div' : 'pre', { class: `msg-body${md ? ' md' : ''}${expanded ? ' full' : clamp ? ' collapsed' : ''}` });
-  fillBody(body, shown, re, md);
+  fillBody(body, shown, re, md, col);
   const foot = el('div', { class: 'msg-foot' }, tagWidgets(m));
 
   card.append(head, body);
@@ -992,6 +1024,13 @@ function bindUi() {
     renderMdControl();
     renderMessages();
   });
+  $('#btn-col').addEventListener('click', () => {
+    LS.col = !LS.col;
+    S.colOverride.clear(); // a global flip outranks the per-card choices
+    renderColControl();
+    renderMessages();
+  });
+
   // coming back to a tab that has been refreshing (or not) in the background
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && refreshSecs()) refreshAll();
@@ -1170,6 +1209,7 @@ async function openSettings(note) {
   applyTheme(theme()); // sync the switch with whatever the pre-paint script decided
   renderRefreshControl();
   renderMdControl();
+  renderColControl();
   await reload();
   setupTimer();
 })();

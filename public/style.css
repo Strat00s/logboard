@@ -35,6 +35,12 @@
   --warn-bg: #2a2418;
   --warn-line: #5c4a1f;
   --backdrop: rgba(0, 0, 0, .6);
+  /* ANSI SGR palette — ansi.js paints base colours through these; the 16
+     entries follow the theme, black stays a visible grey on dark surfaces. */
+  --ansi-0: #6e7681; --ansi-1: #f85149; --ansi-2: #3fb950; --ansi-3: #d29922;
+  --ansi-4: #58a6ff; --ansi-5: #bc8cff; --ansi-6: #39c5cf; --ansi-7: #c9d1d9;
+  --ansi-8: #8b949e; --ansi-9: #ff7b72; --ansi-10: #56d364; --ansi-11: #e3b341;
+  --ansi-12: #79c0ff; --ansi-13: #d2a8ff; --ansi-14: #56d4dd; --ansi-15: #f0f6fc;
   --scheme: dark;
   --mono: "DejaVu Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -76,6 +82,10 @@
   --warn-bg: #fdf4dd;
   --warn-line: #dcc074;
   --backdrop: rgba(23, 30, 42, .45);
+  --ansi-0: #57606a; --ansi-1: #cf222e; --ansi-2: #116329; --ansi-3: #7d4e00;
+  --ansi-4: #0550ae; --ansi-5: #8250df; --ansi-6: #1b7c83; --ansi-7: #323842;
+  --ansi-8: #6e7781; --ansi-9: #a40e26; --ansi-10: #1a7f37; --ansi-11: #9a6701;
+  --ansi-12: #218bff; --ansi-13: #a475f9; --ansi-14: #3192aa; --ansi-15: #1c2128;
   --scheme: light;
 }
 * { box-sizing: border-box; }
@@ -264,6 +274,34 @@ body {
 .msg-body.collapsed { max-height: 470px; }
 /* a card the reader opened with the expand toggle — no clamp, no inner scrollbar */
 .msg-body.full { max-height: none; overflow: visible; }
+
+/* ------------------------------------------------------- ANSI colours */
+/* ansi.js maps the 16 base SGR colours to .ans-fg-N / .ans-bg-N classes so
+   they follow the theme (256-colour / truecolour become fixed inline hexes
+   and are not themed). Attributes stack freely. */
+.ans-fg-0 { color: var(--ansi-0); } .ans-fg-1 { color: var(--ansi-1); }
+.ans-fg-2 { color: var(--ansi-2); } .ans-fg-3 { color: var(--ansi-3); }
+.ans-fg-4 { color: var(--ansi-4); } .ans-fg-5 { color: var(--ansi-5); }
+.ans-fg-6 { color: var(--ansi-6); } .ans-fg-7 { color: var(--ansi-7); }
+.ans-fg-8 { color: var(--ansi-8); } .ans-fg-9 { color: var(--ansi-9); }
+.ans-fg-10 { color: var(--ansi-10); } .ans-fg-11 { color: var(--ansi-11); }
+.ans-fg-12 { color: var(--ansi-12); } .ans-fg-13 { color: var(--ansi-13); }
+.ans-fg-14 { color: var(--ansi-14); } .ans-fg-15 { color: var(--ansi-15); }
+.ans-bg-0 { background-color: var(--ansi-0); } .ans-bg-1 { background-color: var(--ansi-1); }
+.ans-bg-2 { background-color: var(--ansi-2); } .ans-bg-3 { background-color: var(--ansi-3); }
+.ans-bg-4 { background-color: var(--ansi-4); } .ans-bg-5 { background-color: var(--ansi-5); }
+.ans-bg-6 { background-color: var(--ansi-6); } .ans-bg-7 { background-color: var(--ansi-7); }
+.ans-bg-8 { background-color: var(--ansi-8); } .ans-bg-9 { background-color: var(--ansi-9); }
+.ans-bg-10 { background-color: var(--ansi-10); } .ans-bg-11 { background-color: var(--ansi-11); }
+.ans-bg-12 { background-color: var(--ansi-12); } .ans-bg-13 { background-color: var(--ansi-13); }
+.ans-bg-14 { background-color: var(--ansi-14); } .ans-bg-15 { background-color: var(--ansi-15); }
+.ans-b { font-weight: 700; }
+.ans-dim { opacity: .62; }
+.ans-i { font-style: italic; }
+.ans-u { text-decoration: underline; }
+.ans-s { text-decoration: line-through; }
+.ans-u.ans-s { text-decoration: underline line-through; }
+.ans-inv { color: var(--bg2); background-color: var(--fg); }
 
 /* ------------------------------------------------------ markdown bodies */
 /* Only shown when the reader turns markdown on (global or per message); the

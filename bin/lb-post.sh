@@ -109,8 +109,9 @@ fi
 command -v curl >/dev/null 2>&1 || { echo "lb-post.sh: curl is required" >&2; exit 3; }
 
 # ---- JSON envelope -----------------------------------------------------------
-# Strip control chars JSON forbids (ANSI junk), then escape the rest.
-json_text=$(printf '%s' "$MESSAGE" | tr -d '\000-\010\013\014\016-\037')
+# Strip control chars JSON forbids — but keep ESC (the board renders SGR
+# colours) plus tab and newline; json_escape escapes ESC as \u001b.
+json_text=$(printf '%s' "$MESSAGE" | tr -d '\000-\010\013\014\016-\032\034-\037')
 json_escape() {
   local s=$1
   s=${s//\\/\\\\}
@@ -118,6 +119,7 @@ json_escape() {
   s=${s//$'\r'/\\r}
   s=${s//$'\n'/\\n}
   s=${s//$'\t'/\\t}
+  s=${s//$'\e'/\\u001b}
   printf '%s' "$s"
 }
 
