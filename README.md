@@ -201,7 +201,9 @@ Both print the same `posted #17 -> chan/thread 26 chars` confirmation as
 `lb-post` (plus the `NEW … unassigned` note), use the same env vars, and exit
 `0` posted / `1` rejected or unreachable / `2` bad usage.
 `lb-post.py` needs only the Python 3 standard library; `lb-post.sh` needs
-bash + `curl` and nothing else — pick whichever is present on the box.
+bash + `curl` and nothing else — pick whichever is present on the box. Both
+post ANSI-coloured output verbatim (only control characters that are invalid
+in JSON get stripped, escape sequences survive).
 
 ### `POST /api/post` fields
 
@@ -209,7 +211,7 @@ bash + `curl` and nothing else — pick whichever is present on the box.
 |---|---|---|---|
 | `channel` | `chan`, `c`, header `X-Channel`, `?channel=` | `default` | created if unknown |
 | `thread` | `topic`, `t`, header `X-Thread`, `?thread=` | `general` | created if unknown |
-| `text` | `body`, `message`, `msg`, `log` | — (required in JSON) | with a raw body the whole payload is the text |
+| `text` | `body`, `message`, `msg`, `log` | — (required in JSON) | with a raw body the whole payload is the text; leading/trailing blank lines are trimmed, inside whitespace is kept |
 | `tags` | `tag`, header `X-Tags`, `?tags=` | — | array, or `"a,b"`, or `"a b"`; leading `#` stripped |
 | `ts` | `timestamp`, `time`, header `X-Ts`, `?ts=` | now | ISO-8601, `YYYY-MM-DD HH:MM:SS`, or epoch seconds |
 | `source` | `host`, `from`, header `X-Source` | — | free-form label shown in the UI |
@@ -240,10 +242,11 @@ accent bar. Above the channels sits **Unassigned**; at the bottom, a `curl`
 example for the channel or thread you are looking at.
 
 **Message list** — newest first. Each card header carries the timestamp, id, channel /
-thread, length (`56 chars · 56 B`), and the posting source. Long bodies collapse to a
-scroll box with an **expand** toggle below the card; a message too big for the list
-loads its full text on the first expand and then just opens and collapses. The choice
-is remembered per browser, so an opened card stays opened across reloads.
+thread, length (`56 chars · 56 B`), and the posting source. Bodies longer
+than 25 lines collapse to a 25-line scroll box with an **expand** toggle
+below the card; a message too big for the list loads its full text on the
+first expand and then just opens and collapses. The choice is remembered per
+browser, so an opened card stays opened across reloads.
 
 **Markdown** — the `md` button in the filter row renders message bodies as
 GitHub-flavoured markdown (headings, tables, task lists, fenced code, links;
@@ -255,6 +258,17 @@ happens in the browser: `marked` turns the text into HTML, `DOMPurify` strips
 everything hostile from it (bodies are posted by scripts and treated as
 untrusted input), and both libraries are vendored npm packages served from
 `/vendor` — still no build step and no internet needed.
+
+**Colours** — the `col` button in the filter row renders ANSI escape
+sequences (`\x1b[31m` etc.) as their colours: the 16 base palette entries
+follow the current theme, 256-colour and truecolour codes stay exact. All
+other sequences (cursor moves, window titles) are hidden either way; with
+`col` off they are simply visible characters. Like `md`, the choice is
+remembered per browser, every card that contains sequences has its own `col`
+button for a one-off override, and a global flip clears the one-offs. The
+renderer (`public/ansi.js`, no dependencies) only ever creates spans with
+fixed classes or self-generated hex colours, so it is as hostile-input-safe
+as the markdown view — and it stacks: markdown on, colours on, both apply.
 
 **Searching** — type in the box (`/` focuses it):
 
@@ -361,7 +375,7 @@ node server.js --port 9000 --db /var/lib/logboard/messages.db --token s3cret
 ```
 
 **Where each setting lives.** Browser-local things — the theme, the refresh
-interval, the markdown toggle, the write token, the sidebar expansion and the
+interval, the markdown and colour toggles, the write token, the sidebar expansion and the
 reader id — live in that browser's `localStorage` only. Anything that changes
 what the board itself does, like the retention window, is stored in the database
 and edited in ⚙ settings. Nothing in the browser talks to the server that is not
@@ -498,10 +512,11 @@ unless you set `LB_TOKEN` — write too. It is meant for a trusted LAN or a tunn
 ```
 server.js                     HTTP API, static UI, sweeps
 lib/db.js                     schema, search, ordering, adopt/merge, expiry, read state
-public/index.html|app.js|markdown.js|style.css
+public/index.html|app.js|markdown.js|ansi.js|style.css
                               front-end (no framework, no build); markdown.js wraps
                               marked + DOMPurify, served by this app at /vendor;
-                              style.css holds both theme palettes as CSS variables
+                              ansi.js paints ANSI colours; style.css holds both
+                              theme palettes as CSS variables
 bin/lb-post                   POSIX shell posting helper
 bin/lb-post.py|lb-post.sh     pipe-first posting clients (python3 stdlib · bash+curl)
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
