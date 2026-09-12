@@ -123,6 +123,17 @@ async function main() {
     const moved = await req('PATCH', `/api/threads/${t2.data.thread.id}`, { channel: 'PC1' });
     ok(moved.data.thread.channel_id === first.data.channel.id, 'thread moved between channels', moved.data.thread);
 
+    // render defaults: stored on targets, surfaced through the tree
+    ok((await req('PATCH', `/api/channels/${chan.data.channel.id}`, { default_md: true, default_col: false })).data.channel.default_md === 1, 'channel md default set');
+    ok((await req('PATCH', `/api/threads/${t1.data.thread.id}`, { default_col: true })).data.thread.default_col === 1, 'thread colour default set');
+    const dTree = (await get('/api/tree')).data.channels.find((c) => c.id === chan.data.channel.id);
+    ok(dTree.default_md === 1 && dTree.default_col === 0, 'tree carries channel defaults', dTree);
+    const dThr = dTree.threads.find((t) => t.id === t1.data.thread.id);
+    ok(dThr.default_col === 1 && dThr.default_md === null, 'tree carries thread defaults (unset stays null)', dThr);
+    ok((await req('PATCH', `/api/channels/${chan.data.channel.id}`, { default_md: null })).data.channel.default_md === null, 'default cleared back to inherit');
+    ok((await req('PATCH', `/api/threads/${t1.data.thread.id}`, { default_md: 'yes' })).status === 400, 'invalid render default rejected');
+    ok((await req('PATCH', `/api/channels/${chan.data.channel.id}`, { default_md: true })).data.channel.default_col === 0, 'partial update keeps the other default');
+
     const assignedBefore = (await get('/api/tree')).data.channels.filter((c) => !c.pending).map((c) => c.id);
     const want = [chan.data.channel.id, ...assignedBefore.filter((id) => id !== chan.data.channel.id)];
     const reordered = await req('POST', '/api/channels/reorder', { ids: want });

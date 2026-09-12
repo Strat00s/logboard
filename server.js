@@ -91,6 +91,8 @@ const chanView = (c) => ({
   pending: !!c.pending,
   expires_at: c.expires_at,
   created_at: c.created_at,
+  default_md: c.default_md,
+  default_col: c.default_col,
 });
 
 const threadView = (t) => ({
@@ -101,6 +103,8 @@ const threadView = (t) => ({
   pending: !!t.pending,
   expires_at: t.expires_at,
   created_at: t.created_at,
+  default_md: t.default_md,
+  default_col: t.default_col,
 });
 
 function targetPayload(req) {
@@ -308,7 +312,12 @@ app.post('/api/channels', requireToken, (req, res) => {
 });
 
 app.patch('/api/channels/:id', requireToken, (req, res) => {
-  const c = store.renameChannel(Number(req.params.id), req.body?.name);
+  const id = Number(req.params.id);
+  const b = req.body || {};
+  let c = store.mustGetChannel(id);
+  if (b.name !== undefined) c = store.renameChannel(id, b.name);
+  if (b.default_md !== undefined || b.default_col !== undefined)
+    c = store.setRenderDefaults('channels', id, { md: b.default_md, col: b.default_col });
   res.json({ ok: true, channel: chanView(c) });
 });
 
@@ -341,19 +350,22 @@ app.post('/api/threads', requireToken, (req, res) => {
 
 app.patch('/api/threads/:id', requireToken, (req, res) => {
   const id = Number(req.params.id);
+  const b = req.body || {};
   let thread = store.mustGetThread(id);
-  if (req.body?.name !== undefined && req.body.name !== null && req.body.name !== thread.name) {
-    thread = store.renameThread(id, req.body.name);
+  if (b.name !== undefined && b.name !== null && b.name !== thread.name) {
+    thread = store.renameThread(id, b.name);
   }
   const moveTo =
-    req.body?.channel_id !== undefined
-      ? Number(req.body.channel_id)
-      : req.body?.channel !== undefined
-        ? store.findChannel(req.body.channel)?.id
+    b.channel_id !== undefined
+      ? Number(b.channel_id)
+      : b.channel !== undefined
+        ? store.findChannel(b.channel)?.id
         : undefined;
   if (moveTo !== undefined && moveTo !== thread.channel_id) {
     thread = store.moveThread(id, moveTo);
   }
+  if (b.default_md !== undefined || b.default_col !== undefined)
+    thread = store.setRenderDefaults('threads', id, { md: b.default_md, col: b.default_col });
   res.json({ ok: true, thread: threadView(thread) });
 });
 
