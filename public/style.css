@@ -256,10 +256,12 @@ body {
 .msg-head .len { font-variant-numeric: tabular-nums; }
 .msg-head .src { font-style: italic; }
 .msg-body {
+  border-top: 1px solid var(--line-soft);
   margin: 0; padding: 9px 11px; font: 12.5px/1.5 var(--mono);
-  white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word; max-height: 470px; overflow: auto;
 }
-.msg-body.collapsed { max-height: 190px; }
+/* collapsed cards show 25 lines (25 × 18.75px) before they scroll */
+.msg-body.collapsed { max-height: 470px; }
 /* a card the reader opened with the expand toggle — no clamp, no inner scrollbar */
 .msg-body.full { max-height: none; overflow: visible; }
 

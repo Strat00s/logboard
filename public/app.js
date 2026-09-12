@@ -632,7 +632,7 @@ function messageCard(m, re) {
   const hasFull = m.truncated && S.fullBody.has(m.id);
   const expanded = S.msgExpanded.has(m.id) && (!m.truncated || hasFull);
   const shown = hasFull ? S.fullBody.get(m.id) : m.body;
-  const clamp = m.truncated || shown.split('\n').length > 12 || m.chars > 1400;
+  const clamp = m.truncated || shown.split('\n').length > 25 || m.chars > 2800;
   const body = el(md ? 'div' : 'pre', { class: `msg-body${md ? ' md' : ''}${expanded ? ' full' : clamp ? ' collapsed' : ''}` });
   fillBody(body, shown, re, md);
   const foot = el('div', { class: 'msg-foot' }, tagWidgets(m));
