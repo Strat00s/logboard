@@ -174,6 +174,35 @@ Real cron lines, one per machine:
 @monthly zpool status tank | lb-post -c nas -t scrub -T zfs || lb-post -c nas -t scrub -T zfs -T error -m "zpool status failed"
 ```
 
+### `bin/lb-post.py` · `bin/lb-post.sh`
+
+Two pipe-first variants of the same idea for the case where the whole command —
+not just its text — arrives on a pipe. They take the target as arguments and
+the **message from stdin**, so anything that prints can be posted verbatim:
+
+```sh
+df -h                    | bin/lb-post.py -c NAS -t "disk usage" -T df
+certbot renew --dry-run  |& bin/lb-post.sh -c web01 -t certificates -T renew
+```
+
+| option | meaning |
+|---|---|
+| `-c`, `--channel` / `-t`, `--thread` | target (default `default`/`general`, created if unknown) |
+| `-T`, `--tag TAG` | repeatable; commas split, leading `#` stripped |
+| `-k`, `--token` | write token — the env var `LB_TOKEN` is preferred, argv is visible in `ps` |
+| `-m TEXT` / `-f PATH` | message from an argument or a file instead of the pipe |
+| `--ts WHEN` | backdate the message (ISO-8601 or epoch seconds) |
+| `--source NAME` | label in the UI (default: hostname; env `LB_SOURCE`) |
+| `-u`, `--url` | server base URL (env `LB_URL`, default `http://127.0.0.1:8421`) |
+| `--timeout SECS` · `-r`, `--retries N` | per-request timeout; retries on network errors and 5x |
+| `-q`, `--quiet` | silent on success |
+
+Both print the same `posted #17 -> chan/thread 26 chars` confirmation as
+`lb-post` (plus the `NEW … unassigned` note), use the same env vars, and exit
+`0` posted / `1` rejected or unreachable / `2` bad usage.
+`lb-post.py` needs only the Python 3 standard library; `lb-post.sh` needs
+bash + `curl` and nothing else — pick whichever is present on the box.
+
 ### `POST /api/post` fields
 
 | field | aliases | default | notes |
@@ -474,6 +503,7 @@ public/index.html|app.js|markdown.js|style.css
                               marked + DOMPurify, served by this app at /vendor;
                               style.css holds both theme palettes as CSS variables
 bin/lb-post                   POSIX shell posting helper
+bin/lb-post.py|lb-post.sh     pipe-first posting clients (python3 stdlib · bash+curl)
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
 deploy/logboard.service       systemd unit
 Dockerfile                    multi-stage container image (node:20-slim, runs as uid 1000)
