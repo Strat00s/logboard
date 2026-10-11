@@ -63,6 +63,9 @@ const S = {
   mdTouched: false,
   colTouched: false,
   retentionDays: null,
+  // while a filter is active: {threads: Map, channels: Map} of board-wide
+  // match counts from /api/matches; null when no filter is set
+  match: null,
 };
 
 // --------------------------------------------------------------------- helpers
@@ -187,6 +190,11 @@ async function loadTags() {
   renderTagFilterPanel();
 }
 
+// anything that narrows the message set (sort and limit do not)
+const filterActive = () => Boolean(S.f.q.trim() || S.f.tags.length || S.f.from || S.f.to);
+
+const toIdMap = (obj) => new Map(Object.entries(obj || {}).map(([k, v]) => [Number(k), v]));
+
 async function loadMessages({ keepScroll = false } = {}) {
   const scroll = $('#main').scrollTop; // #main scrolls; the window itself never does
   const query = {
@@ -202,10 +210,31 @@ async function loadMessages({ keepScroll = false } = {}) {
   if (S.scope.kind === 'thread') query.thread = S.scope.threadId;
   else if (S.scope.kind === 'channel') query.channel = S.scope.channelId;
 
+  // sidebar match counts for the active filter, in flight while the list
+  // loads; board-wide on purpose, so threads outside the current scope get
+  // annotated too. A failed fetch (bad regex) just drops the counts.
+  const matches = filterActive()
+    ? api('/api/matches', {
+        query: {
+          q: query.q,
+          mode: query.mode,
+          cs: query.cs,
+          tags: query.tags,
+          tag_match: query.tag_match,
+          from: query.from,
+          to: query.to,
+        },
+      })
+        .then((d) => ({ threads: toIdMap(d.threads), channels: toIdMap(d.channels) }))
+        .catch(() => null)
+    : Promise.resolve(null);
+
   let d;
   try {
     d = await api('/api/messages', { query });
   } catch (err) {
+    S.match = await matches;
+    renderSidebar();
     setStatus(err.message, true);
     return;
   }
@@ -222,6 +251,8 @@ async function loadMessages({ keepScroll = false } = {}) {
   }
   S.total = d.total;
   S.messages = d.messages;
+  S.match = await matches;
+  renderSidebar();
   renderMessages();
   renderCrumbs();
   // restore after the new list exists, otherwise the offset is clamped to old content
@@ -370,7 +401,13 @@ function channelNode(c) {
     }),
     el('span', { class: 'grip', text: '⋮⋮', title: 'drag to reorder' }),
     el('span', { class: 'name', text: c.name }),
-    el('span', { class: 'meta', text: `${fmtNum(c.messages)} · ${fmtAge(c.last_ts)}` }),
+    el('span', {
+      class: 'meta',
+      text: S.match
+        ? `${fmtNum(S.match.channels.get(c.id) || 0)}/${fmtNum(c.messages)} · ${fmtAge(c.last_ts)}`
+        : `${fmtNum(c.messages)} · ${fmtAge(c.last_ts)}`,
+      title: S.match ? `${fmtNum(S.match.channels.get(c.id) || 0)} of ${fmtNum(c.messages)} messages match the filter` : '',
+    }),
     c.unread ? el('span', { class: 'unread-badge', title: `${fmtNum(c.unread)} unread in this channel`, text: fmtNum(c.unread) }) : null,
     el('span', { class: 'row-actions' },
       el('button', { class: 'icon-btn', title: 'add thread', onclick: (e) => { e.stopPropagation(); createThread(c); } }, '＋'),
@@ -396,7 +433,11 @@ function threadNode(channel, t) {
   },
     el('span', { class: 'grip', text: '⋮⋮', title: 'drag to reorder' }),
     el('span', { class: 'name', text: t.name }),
-    el('span', { class: 'meta', text: fmtNum(t.messages) }),
+    el('span', {
+      class: 'meta',
+      text: S.match ? `${fmtNum(S.match.threads.get(t.id) || 0)}/${fmtNum(t.messages)}` : fmtNum(t.messages),
+      title: S.match ? `${fmtNum(S.match.threads.get(t.id) || 0)} of ${fmtNum(t.messages)} messages match the filter` : '',
+    }),
     t.unread ? el('span', { class: 'unread-badge', title: `${fmtNum(t.unread)} unread in this thread`, text: fmtNum(t.unread) }) : null,
     el('span', { class: 'row-actions' },
       el('button', { class: 'icon-btn', title: 'rename thread', onclick: (e) => { e.stopPropagation(); renameThread(channel, t); } }, '✎'),

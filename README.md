@@ -293,7 +293,10 @@ a reader can point a whole channel at markdown once and forget it.
 * `from`/`to` date inputs, or a quick `last hour`/`24h`/`7 days`/`30 days` preset
 * sort order, page size (50–500) and prev/next paging
 
-Matches are highlighted in place.
+Matches are highlighted in place, and while any filter is active every sidebar row
+shows `matches/total` next to its message count — for *all* channels and threads,
+including ones you are not looking at, so you can see where the hits hide before
+clicking around. Clearing the filter restores the plain totals.
 
 **Staying fresh** — the `refresh:` select in the filter row reloads the board on a
 timer: `off`, 5 s … 15 min, 1 h. ⚙ settings takes any exact number of seconds instead,
@@ -457,6 +460,7 @@ board keeps one shared read state.
 | `GET /api/tree` | — | channels → threads, with counts, `pending`, `expires_at`, `unread` and `default_md`/`default_col` per target |
 | `GET /api/tags` | — | tags with message counts |
 | `GET /api/messages` | `q`, `mode`, `cs`, `channel`, `thread`, `tags`, `tag_match`, `from`, `to`, `sort`, `limit`≤2000, `offset`, `truncate` | search; `truncate=0` returns whole bodies, default caps each at 8000 chars and sets `truncated`; each row carries `unread` |
+| `GET /api/matches` | `q`, `mode`, `cs`, `tags`, `tag_match`, `from`, `to` | board-wide match counts per thread and channel for a filter (scope params ignored): `{"threads":{"12":3},"channels":{"2":7}}` |
 | `GET /api/messages/:id` | — | one message, untruncated |
 | `POST /api/post` | [Posting from a script](#posting-from-a-script) | post a message |
 | `POST /api/channels` | `{"name":"NAS"}` | create channel — adopts an unassigned one of that name |

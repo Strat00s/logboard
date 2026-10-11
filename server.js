@@ -237,6 +237,36 @@ app.get('/api/messages', (req, res, next) => {
   res.json({ ok: true, ...result });
 });
 
+// Per-thread and per-channel match counts for a filter — board-wide (any
+// channel/thread scope is ignored) so the sidebar can annotate every row,
+// not just the one currently in view.
+app.get('/api/matches', (req, res, next) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  const mode = req.query.mode === 'regex' ? 'regex' : 'text';
+  if (!q.trim() && mode === 'regex') return next(new HttpError(400, 'regex mode needs q'));
+
+  const tags = String(req.query.tags || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  try {
+    const counts = store.matchCounts({
+      q,
+      mode,
+      cs: req.query.cs === '1' || req.query.cs === 'true',
+      tags,
+      tagMatch: req.query.tag_match === 'any' ? 'any' : 'all',
+      from: parseTs(req.query.from) || undefined,
+      to: parseTs(req.query.to) || undefined,
+    });
+    res.json({ ok: true, ...counts });
+  } catch (err) {
+    if (err instanceof SyntaxError) throw new HttpError(400, `invalid regex: ${err.message}`);
+    throw err;
+  }
+});
+
 // ------------------------------------------------------------------ write APIs
 
 // Posting endpoint. Accepts:

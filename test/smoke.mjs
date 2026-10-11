@@ -162,6 +162,23 @@ async function main() {
     ok((await sGet('q=apt&from=2025-01-01&to=2026-12-31')).data.total === 1, 'date range includes a match');
     ok((await sGet('q=apt&from=2030-01-01')).data.total === 0, 'date range in the future excludes everything');
     ok((await sGet('from=2020-01-01&to=2020-12-31')).data.messages[0].body === 'old note', 'date range finds the backdated message');
+
+    // ---------- board-wide match counts (sidebar annotations)
+    const mGet = (q) => get(`/api/matches?${q}`);
+    const mSmart = (await mGet('q=SMART')).data;
+    ok(mSmart.threads[first.data.thread.id] === 1, 'match counts land on the owning thread', mSmart);
+    ok(mSmart.channels[first.data.channel.id] === 1, 'channel count is the sum over its threads', mSmart);
+    ok(mSmart.threads[viaHeaders.data.thread.id] === undefined, 'threads without a match stay absent', mSmart);
+    const mAny = (await mGet('tags=smart,apt&tag_match=any')).data;
+    ok(mAny.threads[first.data.thread.id] === 1 && mAny.threads[viaHeaders.data.thread.id] === 1, 'tag filter counts per thread', mAny);
+    ok(mAny.channels[first.data.channel.id] === 2, 'tag filter sums per channel', mAny);
+    ok((await mGet(`q=SMART&thread=${viaHeaders.data.thread.id}`)).data.threads[first.data.thread.id] === 1,
+      'scope params are ignored — counts stay board-wide');
+    ok((await mGet('q=a%7D&mode=regex')).status === 200, 'regex counts tolerate a stray brace');
+    ok((await mGet('q=%28unterminated&mode=regex')).status === 400, 'regex counts reject invalid regex');
+    const mAll = (await mGet('')).data;
+    ok(mAll.threads[first.data.thread.id] === 4 && mAll.channels[first.data.channel.id] === 5,
+      'without a filter every message is counted', mAll);
     const desc = (await sGet('sort=desc&limit=3')).data.messages.map((m) => m.ts);
     const asc = (await sGet('sort=asc&limit=3')).data.messages.map((m) => m.ts);
     ok(desc[0] >= desc[1] && asc[0] <= asc[1], 'sort order honoured', { desc: desc.slice(0, 2), asc: asc.slice(0, 2) });
