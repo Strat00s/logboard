@@ -30,15 +30,6 @@ const LS = {
   // ANSI colour rendering of message bodies, same deal
   get col() { return localStorage.getItem('lb.col') === '1'; },
   set col(v) { localStorage.setItem('lb.col', v ? '1' : '0'); },
-  // Read state is per browser: one anonymous id per browser profile, no accounts.
-  get reader() {
-    let v = localStorage.getItem('lb.reader');
-    if (!v) {
-      v = (crypto.randomUUID ? crypto.randomUUID() : `r${Date.now()}${Math.random().toString(36).slice(2)}`);
-      localStorage.setItem('lb.reader', v);
-    }
-    return v;
-  },
 };
 
 const S = {
@@ -51,10 +42,11 @@ const S = {
   messages: [],
   sel: new Set(),
   expanded: new Set(JSON.parse(localStorage.getItem('lb.expanded') || '[]')),
-  // message ids the reader has expanded — kept in localStorage so a card keeps
-  // its shape across manual and automatic reloads; truncated messages also
-  // cache their fetched full body in memory and refetch it on reload
-  msgExpanded: new Set(JSON.parse(localStorage.getItem('lb.msgExpand') || '[]')),
+  // message ids the reader has expanded — page-scoped on purpose: a fresh page
+  // load (or F5) starts every card collapsed, while the refresh timer keeps
+  // whatever is open; truncated messages cache their fetched full body in
+  // memory for as long as the page lives
+  msgExpanded: new Set(),
   fullBody: new Map(),
   timer: null,
   // ids that arrived while this thread has been open; cleared when you leave it
@@ -128,7 +120,6 @@ async function api(path, { method = 'GET', body, query } = {}) {
   const headers = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (LS.token) headers['x-post-token'] = LS.token;
-  headers['x-reader'] = LS.reader;
   const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   let data;
   try { data = await res.json(); } catch { throw new Error(`${res.status} ${res.statusText} — not JSON`); }
@@ -140,9 +131,9 @@ async function api(path, { method = 'GET', body, query } = {}) {
 }
 
 // ------------------------------------------------------------------ read state
-// Opening a thread marks it read once you leave it: that is the "seen" event.
-// While you stay, messages that arrive are flagged as new but stay unread, so
-// refreshing the page still tells you something landed.
+// Opening a thread marks it read once you leave it: that is the "seen" event,
+// shared by every browser now. While you stay, messages that arrive are flagged
+// as new but stay unread, so refreshing the page still tells you something landed.
 
 async function markRead(threadId) {
   try {
@@ -231,7 +222,6 @@ async function loadMessages({ keepScroll = false } = {}) {
   }
   S.total = d.total;
   S.messages = d.messages;
-  await refillFullBodies();
   renderMessages();
   renderCrumbs();
   // restore after the new list exists, otherwise the offset is clamped to old content
@@ -423,10 +413,6 @@ function saveExpanded() {
   localStorage.setItem('lb.expanded', JSON.stringify([...S.expanded]));
 }
 
-function saveMsgExpanded() {
-  localStorage.setItem('lb.msgExpand', JSON.stringify([...S.msgExpanded]));
-}
-
 // Fetch and remember one message's full body (only once — the cache also backs
 // the compact view after collapsing, so no refetch on re-expand).
 async function loadFullText(id) {
@@ -435,16 +421,6 @@ async function loadFullText(id) {
     S.fullBody.set(id, d.message.body);
   }
   return S.fullBody.get(id);
-}
-
-// On reload the list only carries truncated bodies, so re-fetch the full text of
-// every expanded message that is on this page before drawing it.
-async function refillFullBodies() {
-  const need = S.messages.filter((m) => m.truncated && S.msgExpanded.has(m.id) && !S.fullBody.has(m.id));
-  await Promise.all(need.map((m) => loadFullText(m.id).catch(() => {
-    S.msgExpanded.delete(m.id); // target is gone — stop retrying it
-    saveMsgExpanded();
-  })));
 }
 
 function renderCrumbs() {
@@ -652,6 +628,28 @@ function messageCard(m, re) {
   const shown = m.truncated && S.fullBody.has(m.id) ? S.fullBody.get(m.id) : m.body;
   const ansi = window.MAnsi && (col || m.truncated || window.MAnsi.has(shown));
 
+  // Expansion is page-scoped: a fresh load starts every card collapsed and
+  // only the refresh timer keeps whatever is open. One toggle does both jobs
+  // (it lives in the head and in the foot, so a long card can be closed from
+  // either end): it opens a clamped card all the way — loading the full text
+  // first, once, for a message the list truncated — and collapses it back to
+  // the compact scroll box afterwards.
+  const hasFull = m.truncated && S.fullBody.has(m.id);
+  const expanded = S.msgExpanded.has(m.id) && (!m.truncated || hasFull);
+  const clamp = m.truncated || shown.split('\n').length > 25 || m.chars > 2800;
+  const toggleExpand = async (btn) => {
+    if (btn.disabled) return;
+    if (S.msgExpanded.has(m.id)) S.msgExpanded.delete(m.id);
+    else {
+      btn.disabled = true; // opening a truncated card needs the full body first
+      if (m.truncated && !hasFull) {
+        try { await loadFullText(m.id); } catch (err) { btn.disabled = false; setStatus(err.message, true); return; }
+      }
+      S.msgExpanded.add(m.id);
+    }
+    rerenderCard(m.id);
+  };
+
   const head = el('div', { class: 'msg-head' },
     cb,
     el('span', {
@@ -666,6 +664,11 @@ function messageCard(m, re) {
       m.thread_pending || m.channel_pending ? el('span', { class: 'src', text: ' (unassigned)' }) : null),
     el('span', { class: 'len', title: `${fmtBytes(m.bytes)} on disk`, text: `${fmtNum(m.chars)} chars · ${fmtBytes(m.bytes)}` }),
     m.source ? el('span', { class: 'src', text: `via ${m.source}` }) : null,
+    clamp && el('button', {
+      class: 'btn small',
+      title: expanded ? 'collapse this message' : 'expand this message',
+      onclick: (e) => toggleExpand(e.target),
+    }, expanded ? '▾ collapse' : '▸ expand'),
     el('button', {
       class: `btn small${md ? ' on' : ''}`,
       title: md ? 'show this message as raw text' : 'render this message as markdown',
@@ -682,14 +685,6 @@ function messageCard(m, re) {
     }, 'delete'),
   );
 
-  // One button does both jobs: it opens a clamped card all the way (loading the
-  // full text first, once, for a message the list truncated) and collapses it
-  // back to the compact scroll box afterwards. Which cards are open lives in
-  // localStorage, so the shape survives manual and automatic reloads; a loaded
-  // full body is refetched on reload for cards that are still open.
-  const hasFull = m.truncated && S.fullBody.has(m.id);
-  const expanded = S.msgExpanded.has(m.id) && (!m.truncated || hasFull);
-  const clamp = m.truncated || shown.split('\n').length > 25 || m.chars > 2800;
   const body = el(md ? 'div' : 'pre', { class: `msg-body${md ? ' md' : ''}${expanded ? ' full' : clamp ? ' collapsed' : ''}` });
   fillBody(body, shown, re, md, col);
   const foot = el('div', { class: 'msg-foot' }, tagWidgets(m));
@@ -700,20 +695,7 @@ function messageCard(m, re) {
       el('button', {
         class: 'expand',
         text: expanded ? '▾ collapse' : m.truncated ? 'message too long for the list — expand' : '▸ expand',
-        onclick: async (e) => {
-          const btn = e.target;
-          if (btn.disabled) return;
-          if (S.msgExpanded.has(m.id)) S.msgExpanded.delete(m.id);
-          else {
-            btn.disabled = true; // opening a truncated card needs the full body first
-            if (m.truncated && !hasFull) {
-              try { await loadFullText(m.id); } catch (err) { btn.disabled = false; setStatus(err.message, true); return; }
-            }
-            S.msgExpanded.add(m.id);
-          }
-          saveMsgExpanded();
-          rerenderCard(m.id);
-        },
+        onclick: (e) => toggleExpand(e.target),
       })));
   }
   card.append(foot);
@@ -1107,7 +1089,7 @@ window.addEventListener('pagehide', () => {
   if (S.scope.kind !== 'thread') return;
   fetch(`/api/reads/${S.scope.threadId}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-reader': LS.reader },
+    headers: { 'content-type': 'application/json' },
     keepalive: true,
   }).catch(() => {});
 });
