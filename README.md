@@ -47,6 +47,7 @@ channel "PC1"
 - [What it does](#what-it-does)
 - [Quick start](#quick-start)
 - [Posting from a script](#posting-from-a-script)
+- [Reading from a script](#reading-from-a-script)
 - [The web UI](#the-web-ui)
 - [Unassigned targets](#unassigned-targets)
 - [Configuration](#configuration)
@@ -229,6 +230,40 @@ confirms ids, length, tags, and whether the targets were new:
 ```
 
 `201` means a channel or thread was created, `200` that everything already existed.
+
+## Reading from a script
+
+`bin/lb-read.py` is the read-side counterpart of `lb-post`: the same filters the
+web UI has — channel, thread, text or regex query, case sensitivity, tags
+(ALL/ANY), date range — as plain arguments. Reads need no token; Python 3
+standard library only.
+
+```sh
+bin/lb-read.py -c "channel 1" -t "thread 1" --days 7   # everything ≤ 7 days old
+bin/lb-read.py -c PC1 -t "drive health"                # newest 100 of a thread
+bin/lb-read.py -c NAS --days 1 -T error --tag-match any
+bin/lb-read.py -q "SMART.*FAIL" --regex -c NAS
+bin/lb-read.py -c NAS -t backup --raw | grep -i fail   # bodies only
+bin/lb-read.py --json --days 1 | jq '.messages[].body' # machine-readable
+bin/lb-read.py --list                                  # what exists to read
+```
+
+| option | meaning |
+|---|---|
+| `-c`, `--channel` · `-t`, `--thread` | scope: one channel, one thread, or both |
+| `-q`, `--query` · `--regex` · `--case-sensitive` | substring or JavaScript regex search |
+| `-T`, `--tag` · `--tag-match all\|any` | tag filter (repeatable, commas split too) |
+| `--from WHEN` · `--to WHEN` · `--days N` | date range — ISO-8601, `YYYY-MM-DD HH:MM:SS`, epoch seconds; `--days 7` = at most a week old |
+| `--sort asc\|desc` · `--limit N` · `--offset N` | ordering and paging (default newest first, 100 per page) |
+| `--full` | whole bodies — the server truncates at 8000 chars by default |
+| `--raw` · `--json` | message bodies only · the raw API reply |
+| `--list` | every channel and thread with its message count; unassigned marked |
+| `-u`, `--url` · `--timeout` · `-r`, `--retries` | same as `lb-post.py` (env `LB_URL`) |
+
+The default view prints a header line per message (`#id  timestamp  chan/thread
+(source) [tags]`, timestamps in UTC) followed by the body; the `N match(es)`
+summary goes to stderr, so stdout stays pipeable. Exit codes: `0` ok /
+`1` rejected or unreachable / `2` bad usage.
 
 ## The web UI
 
@@ -536,6 +571,7 @@ public/index.html|app.js|markdown.js|ansi.js|style.css
                               theme palettes as CSS variables
 bin/lb-post                   POSIX shell posting helper
 bin/lb-post.py|lb-post.sh     pipe-first posting clients (python3 stdlib · bash+curl)
+bin/lb-read.py                read client: filters, paging, --list (python3 stdlib)
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
 deploy/logboard.service       systemd unit
 Dockerfile                    multi-stage container image (node:24-slim, runs as uid 1000)
