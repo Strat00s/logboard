@@ -75,7 +75,7 @@ In addition to that core:
 * search everything, or just one thread / one channel — plain text or regex,
   filterable by tag and date range
 * channels and threads are created, renamed, reordered, moved and deleted in the UI
-* anything you have not looked at yet is marked **unread** — per browser, no accounts
+* anything you have not looked at yet is marked **unread** — board-wide, no accounts: one reader marks a thread seen for everyone
 * messages render as **markdown** on demand — for the whole board or one card
 * dark and light theme, following the operating system until you pick one
 * an optional timer keeps the whole board fresh while the page sits open
@@ -244,9 +244,9 @@ example for the channel or thread you are looking at.
 **Message list** — newest first. Each card header carries the timestamp, id, channel /
 thread, length (`56 chars · 56 B`), and the posting source. Bodies longer
 than 25 lines collapse to a 25-line scroll box with an **expand** toggle
-below the card; a message too big for the list loads its full text on the
-first expand and then just opens and collapses. The choice is remembered per
-browser, so an opened card stays opened across reloads.
+above *and* below the card; a message too big for the list loads its full
+text on the first expand and then just opens and collapses. Expansion lives
+only as long as the page: the refresh timer keeps cards open, an F5 resets all.
 
 **Markdown** — the `md` button in the filter row renders message bodies as
 GitHub-flavoured markdown (headings, tables, task lists, fenced code, links;
@@ -311,20 +311,21 @@ Every colour in the app is a CSS custom property, re-declared under
 `:root[data-theme="light"]` in `public/style.css`; both palettes are contrast-checked
 against WCAG in the UI test harness.
 
-**Unread** — read state is per browser: on its first request a browser gets an anonymous
-reader id (stored in `localStorage`, sent as `x-reader`), and everything already on the
-board counts as seen. After that:
+**Unread** — read state is **board-wide**: the server keeps one shared watermark per
+thread, so "seen" means *someone* has read up to there — no accounts, no per-browser
+ids, and every browser shows the same unread counts. When the board starts tracking
+reads, everything already on it counts as seen. After that:
 
-* a message that arrives in a thread you have not opened makes that thread and its
+* a message that arrives in a thread nobody has opened makes that thread and its
   channel show an orange **count badge**, and the tab title reads `(3) logboard`
 * open such a thread and its unseen cards stay marked — an orange rule plus a `●` —
   and anything that lands *while you are watching* gets a stronger **NEW** pill
-* **clicking away is what marks the thread as seen**; closing the tab counts too.
-  Channel and all-messages views only show markers, they never mark anything read
+* **clicking away is what marks the thread as seen — for every browser at once**;
+  closing the tab counts too. Channel and all-messages views only show markers,
+  they never mark anything read
 * the crumbs line offers `mark N read` to clear the current scope by hand
 
-The id is deliberately anonymous: it only says *this browser has read up to here*. A
-watermark never moves backwards, so a message cannot silently become unread again —
+A watermark never moves backwards, so a message cannot silently become unread again —
 only a message that arrives later can raise the count. Deleting a thread drops its
 read state with it.
 
@@ -386,8 +387,8 @@ node server.js --port 9000 --db /var/lib/logboard/messages.db --token s3cret
 ```
 
 **Where each setting lives.** Browser-local things — the theme, the refresh
-interval, the markdown and colour toggles, the write token, the sidebar expansion and the
-reader id — live in that browser's `localStorage` only. Anything that changes
+interval, the markdown and colour toggles, the write token and the sidebar expansion —
+live in that browser's `localStorage` only. Anything that changes
 what the board itself does, like the retention window, is stored in the database
 and edited in ⚙ settings. Nothing in the browser talks to the server that is not
 in the [HTTP API](#http-api).
@@ -445,9 +446,9 @@ quadlet unit) instead of the unit in `deploy/`.
 ## HTTP API
 
 Reads need no token; every write needs one when `LB_TOKEN` is set — except the read-state
-endpoints, which only move that browser's own view of the board and so need an `x-reader`
-id instead of a token. Send `x-reader: <id>` on any read to have `unread` filled in;
-without it every `unread` is `0`/`false`.
+endpoints, which only move the board's shared read watermarks and so need no token
+either. `unread` is filled in on every read and is the same for every browser: the
+board keeps one shared read state.
 
 | method + path | body / query | effect |
 |---|---|---|
@@ -477,8 +478,8 @@ without it every `unread` is `0`/`false`.
 | `GET /api/settings` | — | the server-wide settings: `{"retention_days":N}`, `0` = keep everything |
 | `POST /api/settings` | `{"retention_days":N}` | token-gated; enabling it deletes everything older right away |
 
-Errors come back as `{"ok":false,"error":"…"}` with 400 (bad input, invalid regex, or a
-read endpoint without an `x-reader` id), 401 (token), 404 (unknown id/name) or 409 (name in use).
+Errors come back as `{"ok":false,"error":"…"}` with 400 (bad input or invalid regex),
+401 (token), 404 (unknown id/name) or 409 (name in use).
 
 Search examples:
 
