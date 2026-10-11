@@ -246,6 +246,7 @@ bin/lb-read.py -q "SMART.*FAIL" --regex -c NAS
 bin/lb-read.py -c NAS -t backup --raw | grep -i fail   # bodies only
 bin/lb-read.py --json --days 1 | jq '.messages[].body' # machine-readable
 bin/lb-read.py --list                                  # what exists to read
+bin/lb-read.py -c NAS -t backup --days 7 --save ./logs # files under ./logs/NAS/backup/
 ```
 
 | option | meaning |
@@ -258,11 +259,14 @@ bin/lb-read.py --list                                  # what exists to read
 | `--full` | whole bodies — the server truncates at 8000 chars by default |
 | `--raw` · `--json` | message bodies only · the raw API reply |
 | `--list` | every channel and thread with its message count; unassigned marked |
+| `--save DIR` | write each body to `DIR/<channel>/<thread>/`, named `YYYYMMDDTHHMMSSZ-<id>.txt` — directories are created or reused, re-runs overwrite instead of duplicating, bodies are always whole |
 | `-u`, `--url` · `--timeout` · `-r`, `--retries` | same as `lb-post.py` (env `LB_URL`) |
 
 The default view prints a header line per message (`#id  timestamp  chan/thread
 (source) [tags]`, timestamps in UTC) followed by the body; the `N match(es)`
-summary goes to stderr, so stdout stays pipeable. Exit codes: `0` ok /
+summary goes to stderr, so stdout stays pipeable. `--save` replaces the body
+output with one written-path per line (with `--json` the JSON reply is printed
+and the files are written silently). Exit codes: `0` ok /
 `1` rejected or unreachable / `2` bad usage.
 
 ## The web UI

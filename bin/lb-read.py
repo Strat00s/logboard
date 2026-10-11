@@ -10,9 +10,11 @@ The same filters the web UI has, as plain arguments:
   lb-read.py -c NAS --raw | grep -i fail               # bodies only
   lb-read.py --json --days 1 | jq '.messages[].body'  # machine-readable
   lb-read.py --list                                    # what can be read
+  lb-read.py -c NAS -t backup --days 7 --save ./logs  # files under logs/NAS/backup/
 
 --list prints every channel and thread with its message count, so you can
-see what exists before reading it.
+see what exists before reading it. --save writes each message body to a
+file under DIR/<channel>/<thread>/, named by message time and id.
 
 env: LB_URL (default http://127.0.0.1:8421). Reads need no token.
 
@@ -75,6 +77,9 @@ def parse_args(argv):
                     help="print the raw API reply as JSON")
     ap.add_argument("--list", action="store_true",
                     help="list channels and threads with message counts, then exit")
+    ap.add_argument("--save", metavar="DIR",
+                    help="write each body to DIR/<channel>/<thread>/<time>-<id>.txt, "
+                         "creating directories as needed (whole bodies, idempotent)")
     ap.add_argument("-u", "--url", default=os.environ.get("LB_URL") or DEFAULT_URL,
                     metavar="URL", help=f"server base URL (default: $LB_URL or {DEFAULT_URL})")
     ap.add_argument("--timeout", type=float, default=15.0, metavar="SECS",
@@ -153,7 +158,7 @@ def message_params(args):
         params["from"] = frm
     if to:
         params["to"] = to
-    if args.full:
+    if args.full or args.save:
         params["truncate"] = 0
     return params
 
@@ -201,6 +206,37 @@ def print_messages(args, d):
     return 0
 
 
+def safe_name(name):
+    """Filesystem-safe directory name from a channel or thread name."""
+    cleaned = "".join(c if c not in '/\\:*?"<>|' and ord(c) >= 32 else "_" for c in name)
+    return cleaned.strip(" .") or "unnamed"
+
+
+def save_messages(args, d):
+    """One file per message: DIR/channel/thread/YYYYMMDDTHHMMSSZ-id.txt.
+
+    The directory tree mirrors the board; re-running overwrites the same
+    files instead of duplicating them. Bodies are written whole."""
+    if args.json:
+        json.dump(d, sys.stdout, indent=1)
+        print()
+    for m in d["messages"]:
+        stamp = m["ts"][:19].replace("-", "").replace(":", "") + "Z"
+        rel = os.path.join(safe_name(m["channel"]), safe_name(m["thread"]))
+        name = f'{stamp}-{m["id"]}.txt'
+        path = os.path.join(args.save, rel, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(m["body"])
+        if not args.json:
+            print(os.path.join(rel, name))
+    if not args.json and not args.raw:
+        saved = len(d["messages"])
+        note = f", saved {saved}" if saved != d["total"] else ""
+        print(f'{d["total"]} match(es){note}', file=sys.stderr)
+    return 0
+
+
 def main(argv=None):
     args = parse_args(argv)
     if args.retries < 0:
@@ -215,7 +251,12 @@ def main(argv=None):
         return 2
     try:
         d = get(args, "/api/messages", params)
+        if args.save:
+            return save_messages(args, d)
         return print_messages(args, d)
+    except OSError as err:
+        print(f"lb-read.py: cannot write: {err}", file=sys.stderr)
+        return 1
     except ReadError as err:
         print(f"lb-read.py: {err}", file=sys.stderr)
         return 1
