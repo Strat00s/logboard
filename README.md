@@ -86,14 +86,15 @@ In addition to that core:
   **unassigned** and kept for 10 days unless you adopt it
 * storage is one SQLite file — back that one file up and you have backed up everything
 
-**Stack:** Node 20+, Express 5, better-sqlite3, vanilla JS/HTML/CSS front-end
+**Stack:** Node 22+, Express 5, better-sqlite3, vanilla JS/HTML/CSS front-end
 (no build step; the markdown renderer and HTML sanitizer are npm packages served
 straight from `node_modules` at `/vendor`).
 
 ## Quick start
 
-You need **Node 20 or newer** (`node --version`). No database server, no build
-toolchain, no internet access at runtime.
+You need **Node 22 or newer** (`node --version`) — better-sqlite3 ships prebuilt
+binaries for Node 22+, so no compiler toolchain is ever involved. No database
+server, no build step, no internet access at runtime.
 
 ```sh
 git clone https://github.com/<you>/logboard.git
@@ -409,7 +410,7 @@ journalctl -u logboard -f
 ### Run it in a container (docker / podman)
 
 The repo ships a `Dockerfile` (multi-stage: `npm ci --omit=dev`, then a slim
-Node 20 runtime running as the unprivileged `node` user) and a
+Node 24 runtime running as the unprivileged `node` user) and a
 `docker-compose.yml` for `docker compose` or `podman-compose`.
 
 ```sh
@@ -533,7 +534,7 @@ bin/lb-post                   POSIX shell posting helper
 bin/lb-post.py|lb-post.sh     pipe-first posting clients (python3 stdlib · bash+curl)
 test/smoke.mjs                `npm test` — contract checks, boots its own servers
 deploy/logboard.service       systemd unit
-Dockerfile                    multi-stage container image (node:20-slim, runs as uid 1000)
+Dockerfile                    multi-stage container image (node:24-slim, runs as uid 1000)
 docker-compose.yml            compose/podman-compose service; db in the lb_data volume
 LICENSE                       GNU GPL v3.0, verbatim FSF text
 data/messages.db              the database (gitignored)
@@ -558,7 +559,7 @@ never touches `./data/messages.db`. Point it at a specific database with
 | symptom | cause / fix |
 |---|---|
 | `EADDRINUSE` on start | another process owns the port → `--port` |
-| `better-sqlite3` build errors on install | Node too old, or no prebuilt binary for it → use Node 20+ |
+| `better-sqlite3` build errors on install | Node too old, or no prebuilt binary for it → use Node 22+ |
 | posted message invisible | it went to an **unassigned** target — check the Unassigned panel and adopt it |
 | old messages vanished on their own | an unassigned target expired; adopt anything you want to keep |
 | old messages vanish on a schedule | retention is on — ⚙ settings holds the window (it is a server setting; another browser is not deleting them) |

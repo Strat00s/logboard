@@ -9,16 +9,17 @@
 # command-line flags still work if you override the CMD.
 
 # ---- deps: install production node_modules (native better-sqlite3 included) ----
-# node:20-slim is glibc Debian, where better-sqlite3 ships prebuilt binaries:
-# npm ci downloads one, no compiler toolchain needed.
-FROM node:20-slim AS deps
+# node:24-slim is glibc Debian, where better-sqlite3 ships prebuilt binaries
+# for its Node 22+ ABIs: npm ci downloads one, no compiler toolchain needed.
+# (Node 20 is EOL and better-sqlite3 12.x publishes no prebuild for it.)
+FROM node:24-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 ENV NODE_ENV=production
 RUN npm ci --omit=dev && npm cache clean --force
 
 # ---- runtime: app code + the installed node_modules, nothing else ----
-FROM node:20-slim
+FROM node:24-slim
 ENV NODE_ENV=production \
     LB_HOST=0.0.0.0 \
     LB_PORT=8421 \
