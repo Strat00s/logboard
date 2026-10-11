@@ -45,8 +45,6 @@ async function req(method, p, body, { token, raw, base = BASE, reader } = {}) {
   return { status: res.status, data };
 }
 const get = (p, base) => req('GET', p, undefined, { base });
-const rget = (p, reader) => req('GET', p, undefined, { reader });
-const rpost = (p, body, reader) => req('POST', p, body, { reader });
 const post = (b, extra = {}) => req('POST', '/api/post', b, extra);
 
 async function waitForServer(base) {
@@ -205,58 +203,58 @@ async function main() {
     ok((await req('POST', '/api/messages/delete', {})).status === 400, 'bulk delete needs ids');
     ok((await req('DELETE', '/api/messages/999999')).status === 404, 'deleting an unknown message → 404');
 
-    // ---------- read state: what one browser has seen
-    // A "reader" is an anonymous per-browser id. Its first request fixes a
-    // baseline, so pre-existing messages never arrive as unread.
-    const RS = `reader-${process.pid}`;
-    const seed = await post({ channel: 'reader-host', thread: 'reader-thread', text: 'predates the reader' });
+    // ---------- read state: board-wide, one shared view for every browser
+    // There are no reader ids: one watermark set per thread, shared by all
+    // browsers. The baseline was fixed when this board first tracked reads,
+    // so everything posted during this test counts as unread until marked.
+    const seed = await post({ channel: 'reader-host', thread: 'reader-thread', text: 'seed' });
     const rthread = seed.data.thread.id;
-    ok((await rget('/api/health', RS)).data.counts.unread === 0, 'a new reader starts with nothing unread', (await rget('/api/health', RS)).data.counts);
+    const seeded = (await get('/api/health')).data.counts.unread;
+    ok(seeded > 0, 'messages posted since the board began are unread', seeded);
+    ok((await req('POST', '/api/reads', {})).data.marked >= 1, 'mark-all covers the whole board');
+    ok((await get('/api/health')).data.counts.unread === 0, 'nothing unread after mark-all');
 
     const landed = await post({ channel: 'reader-host', thread: 'reader-thread', text: 'landed after' });
-    const rtree = (await rget('/api/tree', RS)).data;
+    const rtree = (await get('/api/tree')).data;
     const rrow = rtree.channels.flatMap((c) => c.threads).find((t) => t.id === rthread);
-    ok(rrow.unread === 1, 'a message that lands later is unread in the tree', rrow);
+    ok(rrow.unread === 1, 'a message that lands after is unread in the tree', rrow);
     ok(rtree.counts.unread === 1, 'the unread total counts it', rtree.counts);
-    const rmsgs = (await rget(`/api/messages?thread=${rthread}`, RS)).data.messages;
+    const rmsgs = (await get(`/api/messages?thread=${rthread}`)).data.messages;
     ok(
       rmsgs[0].id === landed.data.message.id && rmsgs[0].unread === true
         && rmsgs.filter((m) => m.id !== landed.data.message.id).every((m) => m.unread === false),
       'only the new message is flagged in the list', rmsgs.map((m) => [m.id, m.unread]),
     );
-    ok((await rget('/api/health', `other-${process.pid}`)).data.counts.unread === 0, 'read state is per reader');
-    ok((await get('/api/health')).data.counts.unread === 0, 'without a reader id nothing is reported unread');
 
-    const marked = await rpost(`/api/reads/${rthread}`, {}, RS);
+    const marked = await req('POST', `/api/reads/${rthread}`, {});
     ok(marked.data.unread === 0 && marked.data.marked === 1, 'marking a thread read reports the new count', marked.data);
-    ok((await rget(`/api/messages?thread=${rthread}`, RS)).data.messages.every((m) => !m.unread), 'the thread reads as seen');
-    ok((await rpost(`/api/reads/${rthread}`, { last_id: 1 }, RS)).data.unread === 0, 'a stale watermark cannot resurrect unread messages');
+    ok((await get(`/api/messages?thread=${rthread}`)).data.messages.every((m) => !m.unread), 'the thread reads as seen — for every browser');
+    ok((await req('POST', `/api/reads/${rthread}`, { last_id: 1 })).data.unread === 0, 'a stale watermark cannot resurrect unread messages');
 
     await post({ channel: 'reader-host', thread: 'reader-thread', text: 'after marking' });
-    ok((await rget('/api/health', RS)).data.counts.unread === 1, 'marking read does not mute future messages');
+    ok((await get('/api/health')).data.counts.unread === 1, 'marking read does not mute future messages');
 
-    const sideThread = await post({ channel: 'reader-host-b', thread: 'other-thread', text: 'elsewhere' });
-    ok((await rget('/api/tree', RS)).data.counts.unread === 2, 'two threads now carry unread', await rget('/api/health', RS));
-    const cleared = await rpost('/api/reads', { channel_id: 'reader-host' }, RS);
+    await post({ channel: 'reader-host-b', thread: 'other-thread', text: 'elsewhere' });
+    ok((await get('/api/tree')).data.counts.unread === 2, 'two threads now carry unread', (await get('/api/health')).data.counts);
+    const cleared = await req('POST', '/api/reads', { channel_id: 'reader-host' });
     ok(cleared.data.threads === 1 && cleared.data.channel_id > 0, 'mark-all scoped by channel name', cleared.data);
-    const otherThread = (await rget('/api/tree', RS)).data.channels
+    const otherThread = (await get('/api/tree')).data.channels
       .flatMap((c) => c.threads).find((t) => t.name === 'other-thread');
-    const byIdScope = await rpost('/api/reads', { channel_id: otherThread.channel_id }, RS);
+    const byIdScope = await req('POST', '/api/reads', { channel_id: otherThread.channel_id });
     ok(byIdScope.data.threads >= 1, 'mark-all scoped by channel id', byIdScope.data);
-    ok((await rpost('/api/reads', { channel_id: 'no-such-host' }, RS)).status === 404, 'unknown channel for mark-all → 404');
+    ok((await req('POST', '/api/reads', { channel_id: 'no-such-host' })).status === 404, 'unknown channel for mark-all → 404');
     await post({ channel: 'reader-host', thread: 'reader-thread', text: 'unread again' });
-    ok((await rget('/api/health', RS)).data.counts.unread === 1, 'the other channel keeps its unread count');
-    ok((await rpost('/api/reads', {}, RS)).data.marked === 1, 'mark-all clears the rest');
-    ok((await rget('/api/health', RS)).data.counts.unread === 0, 'nothing unread after mark-all');
+    ok((await get('/api/health')).data.counts.unread === 1, 'the other channel keeps its unread count');
+    ok((await req('POST', '/api/reads', {})).data.marked === 1, 'mark-all clears the rest');
+    ok((await get('/api/health')).data.counts.unread === 0, 'nothing unread after mark-all');
 
-    ok((await req('POST', `/api/reads/${rthread}`)).status === 400, 'read endpoints need a reader id');
-    ok((await req('POST', '/api/reads')).status === 400, 'mark-all needs a reader id');
+    ok((await req('POST', `/api/reads/${rthread}`, {}, { reader: 'legacy-id' })).status === 200, 'a leftover x-reader header is simply ignored');
 
     const vanish = await post({ channel: 'reader-host-c', thread: 'vanishing', text: 'before' });
     await post({ channel: 'reader-host-c', thread: 'vanishing', text: 'unread too' });
-    ok((await rget('/api/health', RS)).data.counts.unread === 2, 'both messages of the new thread are unread');
+    ok((await get('/api/health')).data.counts.unread === 2, 'both messages of the new thread are unread');
     await req('DELETE', `/api/threads/${vanish.data.thread.id}`);
-    ok((await rget('/api/health', RS)).data.counts.unread === 0, 'read state does not outlive its thread');
+    ok((await get('/api/health')).data.counts.unread === 0, 'read state does not outlive its thread');
 
     // ---------- unassigned lifetime: nothing has expired yet (10 day grace)
     const stray = await post({ channel: 'stray-host', thread: 'stray-thread', text: 'nobody claimed me' });

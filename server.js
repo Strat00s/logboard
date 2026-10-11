@@ -136,19 +136,10 @@ function targetPayload(req) {
   };
 }
 
-// Read state is per browser: the UI sends a random id in X-Reader (or ?reader=).
-// Requests without one simply get no unread information.
-app.use((req, _res, next) => {
-  const raw = req.get('x-reader') || req.query.reader;
-  const id = typeof raw === 'string' ? raw.trim().slice(0, 64) : '';
-  req.reader = /^[A-Za-z0-9._-]+$/i.test(id) ? id : null;
-  next();
-});
-
 // Counts plus the db file footprint, so the sidebar can show what the board
 // costs without the browser having to ask twice.
-const boardCounts = (reader) => {
-  const c = store.counts(reader);
+const boardCounts = () => {
+  const c = store.counts();
   c.db_bytes = store.dbBytes();
   return c;
 };
@@ -162,13 +153,13 @@ app.get('/api/health', (req, res) => {
     pending_days: CONFIG.pendingDays,
     retention_days: retentionDays(),
     db_bytes: store.dbBytes(),
-    counts: boardCounts(req.reader),
+    counts: boardCounts(),
   });
 });
 
 app.get('/api/tree', (req, res) => {
   maybeSweep();
-  res.json({ ok: true, channels: store.listChannels(req.reader), counts: boardCounts(req.reader) });
+  res.json({ ok: true, channels: store.listChannels(), counts: boardCounts() });
 });
 
 app.get('/api/tags', (req, res) => {
@@ -238,7 +229,6 @@ app.get('/api/messages', (req, res, next) => {
       offset: req.query.offset,
       sort: req.query.sort === 'asc' ? 'asc' : 'desc',
       truncate: req.query.truncate === undefined ? 8000 : Number(req.query.truncate),
-      reader: req.reader,
     });
   } catch (err) {
     if (err instanceof SyntaxError) throw new HttpError(400, `invalid regex: ${err.message}`);
@@ -430,26 +420,24 @@ app.post('/api/admin/sweep', requireToken, (_req, res) => {
   res.json({ ok: true, removed: sweep() });
 });
 
-// Read state. Marking a thread read is how the UI "clicks away": every message up to
-// `last_id` (default: the newest) stops being unread. Needs the reader id, no token —
-// it only ever moves that browser's own watermarks.
-app.post('/api/reads/:id', (req, res, next) => {
-  if (!req.reader) return next(new HttpError(400, 'send an X-Reader id to track read state'));
+// Read state is board-wide: marking a thread read marks it read for everyone —
+// this is how the UI "clicks away". Every message up to `last_id` (default: the
+// newest) stops being unread. No token: it only moves the shared watermarks.
+app.post('/api/reads/:id', (req, res) => {
   const upto = req.body?.last_id ?? req.query.last_id;
-  const r = store.markRead(req.reader, Number(req.params.id), upto === undefined ? undefined : Number(upto));
+  const r = store.markRead(Number(req.params.id), upto === undefined ? undefined : Number(upto));
   res.json({ ok: true, ...r });
 });
 
 app.post('/api/reads', (req, res, next) => {
-  if (!req.reader) return next(new HttpError(400, 'send an X-Reader id to track read state'));
   // scope by id or by channel name, like everywhere else in the API
   const scope = req.body?.channel_id ?? req.query.channel ?? req.query.channel_id;
   if (scope === undefined || scope === null || scope === '') {
-    return res.json({ ok: true, ...store.markAllRead(req.reader, null) });
+    return res.json({ ok: true, ...store.markAllRead(null) });
   }
   const channel = store.findChannel(scope); // accepts an id or a name
   if (!channel) return next(new HttpError(404, `no such channel "${scope}"`));
-  res.json({ ok: true, channel_id: channel.id, ...store.markAllRead(req.reader, channel.id) });
+  res.json({ ok: true, channel_id: channel.id, ...store.markAllRead(channel.id) });
 });
 
 // ---------------------------------------------------------------- vendor libs
